@@ -3,26 +3,56 @@
 {-# LANGUAGE ScopedTypeVariables   #-}
 -- |
 -- Module      : Graphics.Image.Internal
--- Copyright   : (c) Alexey Kuleshevich 2017-2018
+-- Copyright   : (c) Alexey Kuleshevich 2016-2018
 -- License     : BSD3
 -- Maintainer  : Alexey Kuleshevich <lehins@yandex.ru>
 -- Stability   : experimental
 -- Portability : non-portable
 --
-module Graphics.Image.Internal where
+module Graphics.Image.Internal
+  ( Image(..)
+  , Ix2(..)
+  , Comp(..)
+  , ColorSpace
+  , computeI
+  , delayI
+  , makeImage
+  , makeImageS
+  , fromArray
+  , toArray
+  , getComp
+  , setComp
+  , dims
+  , (!)
+  , index
+  , maybeIndex
+  , defaultIndex
+  , borderIndex
+  , map
+  , imap
+  , zipWith
+  , zipWith3
+  , izipWith
+  , izipWith3
+  , traverse
+  , traverse2
+  , transpose
+  , fold
+  , foldMono
+  ) where
 
-import           Control.Monad.IO.Class   (MonadIO (..))
 import qualified Data.Massiv.Array        as A
-import qualified Data.Massiv.Array.IO     as A
 import           Data.Massiv.Array.Unsafe as A
 import           Data.Massiv.Core
 import           Data.Monoid
 import           Data.Typeable
 import           Graphics.ColorSpace
-import           Prelude                  as P hiding (map)
+import           Prelude                  as P hiding (map, zipWith, zipWith3, traverse)
 
+
+-- | Main data type of the library
 data Image cs e = Image !(Array A.S Ix2 (Pixel cs e))
-
+-- It is not a newtype, just so the fusion would works properly
 
 instance ColorSpace cs e => Show (Image cs e) where
   show img =
@@ -101,114 +131,68 @@ delayI (Image arr) = A.delay arr
  #-}
 
 
--- INVESTIGATE: Does `dims` break fusion. If so, make a copy of size in `Image`.
-
 dims :: ColorSpace cs e => Image cs e -> Ix2
-dims (Image arr) = A.size arr
-{-# INLINE dims #-}
+dims = A.size . delayI
+{-# INLINE [~1] dims #-}
+-- INVESTIGATE: Does `dims` break fusion. If so, check if making a copy of it in `Image` alleviates
+-- the issue, otherwise document it.
+-- CHECK if this approach is better: dims (Image arr) = A.size arr
 
+-- | By default all images are created with parallel computation strategy, but it can be changed
+-- with this function.
+setComp :: ColorSpace cs e => Comp -> Image cs e -> Image cs e
+setComp comp = computeI . A.setComp comp . delayI
+{-# INLINE [~1] setComp #-}
+
+getComp :: ColorSpace cs e => Image cs e -> Comp
+getComp = A.getComp . delayI
+{-# INLINE [~1] getComp #-}
+
+-- | Create a scalar image with only one element. Could be handy together with `liftArray2`
+-- function.
 scalar :: ColorSpace cs e => Pixel cs e -> Image cs e
-scalar px = makeImage Seq (1 :. 1) (const px)
+scalar px = computeI $ A.makeArray Seq (1 :. 1) (const px)
 {-# INLINE [~1] scalar #-}
 
 -- | Create an Image by supplying it's dimensions and a pixel generating function.
 --
--- __Note__. If pixel generating function turns out to be a partially applied index function to
--- another image, this break fusuion and will cause that image to be fully computed. If that is not
--- what is desired, recommended approach is to use `traverse` instead.
+-- __Note__. If another image(s) is being used to make the new one with this function, it will
+-- likely to be breaking fusion and will cause that source image to be fully computed. It is
+-- recommended to use `traverse` or `traverse2` instead.
 makeImage :: ColorSpace cs e =>
-             Comp -- ^ Computation strategy to use.
-          -> Ix2 -- ^ (@m@ rows `:.` @n@ columns) - dimensions of a new image.
+             Ix2 -- ^ (@m@ rows `:.` @n@ columns) - dimensions of a new image.
           -> (Ix2 -> Pixel cs e)
           -- ^ A function that takes (@i@-th row `:.` and @j@-th column) as an
           -- argument and returns a pixel for that location.
           -> Image cs e
-makeImage comp sz = computeI . A.makeArray comp sz
+makeImage sz = computeI . A.makeArray Par sz
 {-# INLINE [~1] makeImage #-}
 
-
--- | Construct an image from a nested rectangular shaped list of pixels.
--- Length of an outer list will constitute @m@ rows, while the length of inner lists -
--- @n@ columns. All of the inner lists must be the same length and greater than @0@.
---
--- >>> fromLists Seq [[PixelY (fromIntegral (i*j) / 60000) | j <- [1..300]] | i <- [1..200]]
---
--- <<images/grad_fromLists.png>>
---
-fromLists :: ColorSpace cs e =>
-             Comp
-          -> [[Pixel cs e]]
+-- | Same as `makeImage`, except all further computation on the image will be done sequentially.
+makeImageS :: ColorSpace cs e =>
+             Ix2 -- ^ (@m@ rows `:.` @n@ columns) - dimensions of a new image.
+          -> (Ix2 -> Pixel cs e)
+          -- ^ A function that takes (@i@-th row `:.` and @j@-th column) as an
+          -- argument and returns a pixel for that location.
           -> Image cs e
-fromLists comp = Image . A.fromLists' comp
-{-# INLINE fromLists #-}
+makeImageS sz = computeI . A.makeArray Seq sz
+{-# INLINE [~1] makeImageS #-}
 
--- IO
+-- | Convert a 2-dimensional source array of pixels into an image.
+fromArray :: (Source r Ix2 (Pixel cs e), ColorSpace cs e) => Array r Ix2 (Pixel cs e) -> Image cs e
+fromArray = Image . A.computeSource
+{-# INLINE fromArray #-}
 
--- | Display an image by making a call to an external viewer that is set as a default image viewer
--- by the OS.
-displayImage :: (MonadIO m, ToRGBA cs e) => Image cs e -> m ()
-displayImage (Image arr) = liftIO $ A.displayImage arr
-{-# INLINE displayImage #-}
-
-
--- | Try to guess an image format from file's extension, then attempt to decode it as such. Color
--- space and precision of the result array must match exactly that of the actual image, in order to
--- apply auto conversion use `readImageAuto` instead.
---
--- Might throw `A.ConvertError`, `A.DecodeError` and other standard errors related to file IO.
---
--- Resulting image will be read as specified by the type signature:
---
--- >>> frog <- readImage "images/frog.jpg" :: IO (Image YCbCr Word8)
--- >>> displayImage frog
-readImage ::
-     (MonadIO m, ColorSpace cs e)
-  => FilePath -- ^ File path for an image
-  -> m (Image cs e)
-readImage path = fmap Image (liftIO (A.readImage path))
-{-# INLINE readImage #-}
-
-
--- | Same as `readImage`, but will perform any possible color space and
--- precision conversions in order to match the result image type. Very useful
--- whenever image format isn't known at compile time.
-readImageAuto :: (MonadIO m, ColorSpace cs e) =>
-                  FilePath -- ^ File path for an image
-               -> m (Image cs e)
-readImageAuto path = fmap Image (liftIO (A.readImageAuto path))
-{-# INLINE readImageAuto #-}
-
--- | Inverse of the 'readImage', but similarly to it, will guess an output file format from the file
--- extension and will write to file any image with the colorspace that is supported by that
--- format. Precision of the image might be adjusted using `Elevator` whenever precision of the
--- source image is not supported by the image file format. For instance, <'Image' 'RGBA' 'Double'>
--- being saved as 'PNG' file would be written as <'Image' 'RGBA' 'Word16'>, thus using highest
--- supported precision 'Word16' for that format. If automatic colors space conversion is also
--- desired, `writeImageAuto` can be used instead.
---
--- Can throw `A.ConvertError`, `A.EncodeError` and other usual IO errors.
---
-writeImage :: (MonadIO m, ColorSpace cs e) =>
-               FilePath -> Image cs e -> m ()
-writeImage path img = liftIO (A.writeImage path (delayI img))
-{-# INLINE [~1] writeImage #-}
-
-
-
-writeImageAuto ::
-     (MonadIO m, ToYA cs e, ToRGBA cs e, ToYCbCr cs e, ToCMYK cs e)
-  => FilePath
-  -> Image cs e
-  -> m ()
-writeImageAuto path img = liftIO (A.writeImageAuto path (delayI img))
-{-# INLINE [~1] writeImageAuto #-}
-
+-- | Convert an image into a storable array of pixels
+toArray :: Image cs e -> Array A.S Ix2 (Pixel cs e)
+toArray (Image arr) = arr
+{-# INLINE toArray #-}
 
 -- Indexing
 
 -- | Get a pixel at @i@-th and @j@-th location.
 --
--- >>> img = makeImage Seq (200 :. 200) (\(i :. j) -> PixelY $ fromIntegral (i*j)) / (200*200)
+-- >>> img = makeImage (200 :. 200) (\(i :. j) -> PixelY $ fromIntegral (i*j)) / (200*200)
 -- >>> index img (20 :. 30)
 -- <Luma:(1.5e-2)>
 --
