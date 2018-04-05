@@ -17,7 +17,7 @@
 -- representation, which is hidden from the user. At the same time it means all of the images are
 -- backed by pinned memory, therefore all computations are performed efficiently.
 --
--- * @__@`Image`@ @cs@ @e@__, where @__cs__@ is the `ColorSpace` of an image and @__e__@ is the type
+-- * @ __'Image' cs e__ @, where @__cs__@ is the `ColorSpace` of an image and @__e__@ is the type
 -- denoting precision of an image (@Int@, @Word@, @Double@, etc.) .
 --
 -- Many of the function names exported by this module will clash with the ones from "Prelude", hence
@@ -32,19 +32,21 @@ module Graphics.Image
   (
   -- * Color Space
   -- $colorspace
+  module Graphics.ColorSpace
   -- * Creation
   --
-  -- `makeImageR` is a type restricted version of `makeImage` function, which
+  -- `makeImage` is a type restricted version of `makeImage` function, which
   -- simplifies creation of images with `Double` precision and a particular
   -- representation through an extra argument.
   --
   -- If it is necessary to create an image with an arbitrary precision and
   -- representation, `makeImage` function can be used with a manual type
-  -- specification of result image, eg:
+  -- specification of the result image, eg:
   --
   -- @ makeImage (256 :. 256) (PixelY . fromIntegral . fst) :: Image Y Word8 @
   --
-    makeImage
+  , Image
+  , makeImage
   , fromArray
   , toArray
   , fromLists
@@ -61,16 +63,19 @@ module Graphics.Image
   -- functions. Here is a quick demonstration of how two images can be read as
   -- different representations and later easily combined as their average.
   --
-  -- >>> cluster <- readImageRGB VU "images/cluster.jpg"
+  -- >>> cluster <- readImageRGB "images/cluster.jpg"
   -- >>> displayImage cluster
-  -- >>> centaurus <- readImageRGB VU "images/centaurus.jpg"
+  -- >>> centaurus <- readImageRGB "images/centaurus.jpg"
   -- >>> displayImage centaurus
   -- >>> displayImage ((cluster + centaurus) / 2)
   --
   -- <<images/cluster.jpg>> <<images/centaurus.jpg>> <<images/centaurus_and_cluster.jpg>>
   --
   , readImage
-  --readImageY, readImageYA, readImageRGB, readImageRGBA,
+  , readImageY
+  , readImageYA
+  , readImageRGB
+  , readImageRGBA
   -- ** Writing
   , writeImage
   , displayImage
@@ -105,18 +110,22 @@ module Graphics.Image
   , sum
   , product
   , maximum
-  , minimum --normalize, eqTol,
+  , minimum
+  , normalize
+  --, eqTol,
   -- * Manifest Image
   -- * Representations
   ) where
 
-import qualified Data.Massiv.Array       as A
+import qualified Data.Massiv.Array         as A
+import           Data.Semigroup
 import           Graphics.ColorSpace
-import           Graphics.Image.Internal as I
-import           Graphics.Image.IO
-import           Prelude                 as P hiding (map, maximum, minimum,
-                                               product, sum, traverse, zipWith,
-                                               zipWith3)
+import           Graphics.Image.Internal   as I
+import           Graphics.Image.IO         as I
+import           Graphics.Image.Processing
+import           Prelude                   as P hiding (map, maximum, minimum,
+                                                 product, sum, traverse,
+                                                 zipWith, zipWith3)
 -- import Graphics.Image.Types as IP
 
 -- import Graphics.Image.Processing as IP
@@ -205,6 +214,23 @@ minimum = A.minimum . delayI
 {-# INLINE minimum #-}
 
 
+-- | Scales all of the pixels to be in the range @[0, 1]@.
+normalize :: (ColorSpace cs e, Bounded e, Ord e, Fractional e) =>
+             Image cs e -> Image cs e
+normalize img =
+  if l == s
+    then (if s < 0
+            then (* 0)
+            else if s > 1
+                   then (* 1)
+                   else id)
+           img
+    else I.map (fmap (\ e -> (e - s) / (l - s))) img
+  where
+    l = getMax $ foldMono (Max . foldl1Px max) img
+    s = getMin $ foldMono (Min . foldl1Px min) img
+{-# INLINE normalize #-}
+
 -- -- | scales all of the pixels to be in the range @[0, 1]@.
 -- normalize :: (Array arr cs e, Array arr X e, Fractional e, Ord e) =>
 --              Image arr cs e -> Image arr cs e
@@ -249,7 +275,7 @@ toLists (Image arr) = A.toLists arr
 {-# INLINE toLists #-}
 
 -- $colorspace
--- Here is a list of default Pixels with their respective constructors:
+-- Here is a list of Pixels with their respective constructors:
 --
 -- @
 --     * __'Pixel' 'Y' e      = PixelY y__              - Luma, also commonly denoted as __Y'__.

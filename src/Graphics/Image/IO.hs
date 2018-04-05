@@ -47,7 +47,7 @@ import           Graphics.Image.Internal
 -- by the OS.
 displayImage :: (MonadIO m, ToRGBA cs e) => Image cs e -> m ()
 displayImage (Image arr) = liftIO $ A.displayImage arr
-{-# INLINE displayImage #-}
+{-# NOINLINE displayImage #-}
 
 
 -- | Try to guess an image format from file's extension, then attempt to decode it as such. Color
@@ -65,7 +65,7 @@ readImage ::
   => FilePath -- ^ File path for an image
   -> m (Image cs e)
 readImage path = fmap Image (liftIO (A.readImage path))
-{-# INLINE readImage #-}
+{-# NOINLINE readImage #-}
 
 
 -- | Same as `readImage`, but will perform any possible color space and
@@ -116,16 +116,16 @@ readImageRGBA = readImageAuto
 --
 writeImage :: (MonadIO m, ColorSpace cs e) =>
                FilePath -> Image cs e -> m ()
-writeImage path img = liftIO (A.writeImage path (delayI img))
-{-# INLINE [~1] writeImage #-}
+writeImage path (Image arr) = liftIO (A.writeImage path arr)
+{-# NOINLINE writeImage #-}
 
 
-
+-- | Write any image while doing any necessary color space and precision conversions.
 writeImageAuto ::
      (MonadIO m, ToYA cs e, ToRGBA cs e, ToYCbCr cs e, ToCMYK cs e)
   => FilePath
   -> Image cs e
   -> m ()
-writeImageAuto path img = liftIO (A.writeImageAuto path (delayI img))
-{-# INLINE [~1] writeImageAuto #-}
+writeImageAuto path (Image arr) = liftIO (A.writeImageAuto path arr)
+{-# NOINLINE writeImageAuto #-}
 

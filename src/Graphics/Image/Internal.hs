@@ -13,11 +13,13 @@ module Graphics.Image.Internal
   ( Image(..)
   , Ix2(..)
   , Comp(..)
-  , ColorSpace
+  , ColorSpace(..)
+  , Pixel
+  , Border(..)
   , computeI
   , delayI
   , makeImage
-  , makeImageS
+  , makeImageC
   , fromArray
   , toArray
   , getComp
@@ -52,7 +54,7 @@ import           Prelude                  as P hiding (map, zipWith, zipWith3, t
 
 -- | Main data type of the library
 data Image cs e = Image !(Array A.S Ix2 (Pixel cs e))
--- It is not a newtype, just so the fusion would works properly
+-- It is not a newtype, just so the fusion would work properly
 
 instance ColorSpace cs e => Show (Image cs e) where
   show img =
@@ -168,15 +170,16 @@ makeImage :: ColorSpace cs e =>
 makeImage sz = computeI . A.makeArray Par sz
 {-# INLINE [~1] makeImage #-}
 
--- | Same as `makeImage`, except all further computation on the image will be done sequentially.
-makeImageS :: ColorSpace cs e =>
-             Ix2 -- ^ (@m@ rows `:.` @n@ columns) - dimensions of a new image.
-          -> (Ix2 -> Pixel cs e)
-          -- ^ A function that takes (@i@-th row `:.` and @j@-th column) as an
-          -- argument and returns a pixel for that location.
+-- | Same as `makeImage`, except computation startegy can be supplied as an argument.
+makeImageC :: ColorSpace cs e =>
+              Comp
+           -> Ix2 -- ^ (@m@ rows `:.` @n@ columns) - dimensions of a new image.
+           -> (Ix2 -> Pixel cs e)
+           -- ^ A function that takes (@i@-th row `:.` and @j@-th column) as an
+           -- argument and returns a pixel for that location.
           -> Image cs e
-makeImageS sz = computeI . A.makeArray Seq sz
-{-# INLINE [~1] makeImageS #-}
+makeImageC comp sz = computeI . A.makeArray comp sz
+{-# INLINE [~1] makeImageC #-}
 
 -- | Convert a 2-dimensional source array of pixels into an image.
 fromArray :: (Source r Ix2 (Pixel cs e), ColorSpace cs e) => Array r Ix2 (Pixel cs e) -> Image cs e
