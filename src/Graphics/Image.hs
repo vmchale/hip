@@ -1,6 +1,7 @@
---{-# OPTIONS_GHC -fno-warn-unused-imports -fno-warn-duplicate-exports #-}
+{-# OPTIONS_GHC -fno-warn-duplicate-exports #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE PatternSynonyms     #-}
 -- |
 -- Module      : Graphics.Image
 -- Copyright   : (c) Alexey Kuleshevich 2016-2018
@@ -43,10 +44,17 @@ module Graphics.Image
   -- representation, `makeImage` function can be used with a manual type
   -- specification of the result image, eg:
   --
-  -- @ makeImage (256 :. 256) (PixelY . fromIntegral . fst) :: Image Y Word8 @
+  -- @ makeImage (256 :. 256) (\(i :. _) -> PixelY (fromIntegral i)) :: I.Image Y Word8 @
   --
   , Image
+  , Ix2(..)
   , makeImage
+  -- * Computation
+  , Comp(..)
+  , pattern Par
+  , makeImageC
+  , setComp
+  -- * Conversion
   , fromArray
   , toArray
   , fromLists
@@ -102,6 +110,7 @@ module Graphics.Image
   , traverse
   , traverse2
   , transpose
+  , module Graphics.Image.Processing
   -- backpermute,
   -- (|*|),
   -- * Reduction
@@ -126,6 +135,7 @@ import           Graphics.Image.Processing
 import           Prelude                   as P hiding (map, maximum, minimum,
                                                  product, sum, traverse,
                                                  zipWith, zipWith3)
+import Data.Foldable (foldl1)
 -- import Graphics.Image.Types as IP
 
 -- import Graphics.Image.Processing as IP
@@ -205,13 +215,13 @@ product = A.product . delayI
 -- | Retrieve the biggest pixel from an image
 maximum :: (ColorSpace cs e, Ord (Pixel cs e)) => Image cs e -> Pixel cs e
 maximum = A.maximum . delayI
-{-# INLINE maximum #-}
+{-# INLINE [~1] maximum #-}
 
 
 -- | Retrieve the smallest pixel from an image
 minimum :: (ColorSpace cs e, Ord (Pixel cs e)) => Image cs e -> Pixel cs e
 minimum = A.minimum . delayI
-{-# INLINE minimum #-}
+{-# INLINE [~1] minimum #-}
 
 
 -- | Scales all of the pixels to be in the range @[0, 1]@.
@@ -227,20 +237,9 @@ normalize img =
            img
     else I.map (fmap (\ e -> (e - s) / (l - s))) img
   where
-    l = getMax $ foldMono (Max . foldl1Px max) img
-    s = getMin $ foldMono (Min . foldl1Px min) img
+    l = getMax $ foldMono (Max . foldl1 max) img
+    s = getMin $ foldMono (Min . foldl1 min) img
 {-# INLINE normalize #-}
-
--- -- | scales all of the pixels to be in the range @[0, 1]@.
--- normalize :: (Array arr cs e, Array arr X e, Fractional e, Ord e) =>
---              Image arr cs e -> Image arr cs e
--- normalize !img = if l == s
---                  then (if s < 0 then (*0) else if s > 1 then (*1) else id) img
---                  else I.map (liftPx (\ !e -> (e - s) / (l - s))) img
---   where
---     !(PixelX l, PixelX s) = (maximum (I.map (PixelX . foldl1Px max) img),
---                              minimum (I.map (PixelX . foldl1Px min) img))
--- {-# INLINE normalize #-}
 
 
 -- -- | Check weather two images are equal within a tolerance. Useful for comparing
@@ -252,27 +251,6 @@ normalize img =
 -- {-# INLINE eqTol #-}
 
 
--- | Construct an image from a nested rectangular shaped list of pixels.  Length of an outer list
--- will constitute @m@ rows, while the length of inner lists - @n@ columns. All of the inner lists
--- must be of the same length, otherwise an error will be thrown.
---
--- >>> fromLists [[PixelY (fromIntegral (i*j) / 60000) | j <- [1..300]] | i <- [1..200]]
---
--- <<images/grad_fromLists.png>>
---
-fromLists :: ColorSpace cs e =>
-             [[Pixel cs e]]
-          -> Image cs e
-fromLists = Image . A.fromLists' Par
-{-# INLINE fromLists #-}
-
-
--- | Convert an image into a nested lists of pixels
---
--- prop> img == fromLists (toLists img)
-toLists :: ColorSpace cs e => Image cs e -> [[Pixel cs e]]
-toLists (Image arr) = A.toLists arr
-{-# INLINE toLists #-}
 
 -- $colorspace
 -- Here is a list of Pixels with their respective constructors:

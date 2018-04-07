@@ -10,15 +10,17 @@
 -- Stability   : experimental
 -- Portability : non-portable
 --
-module Graphics.Image.Processing.Geometric (
+module Graphics.Image.Processing.Geometric
   -- ** Sampling
-  downsample
-  -- ,
-  -- downsampleRows, downsampleCols,
-  -- upsampleRows, upsampleCols
+  ( downsample
+  , downsampleRows
+  , downsampleCols
+  , upsampleRows
+  , upsampleCols
   , upsample
-  -- -- ** Concatenation
-  -- leftToRight, topToBottom,
+  -- ** Concatenation
+  , leftToRight
+  , topToBottom
   -- -- ** Canvas
   -- translate, canvasSize, crop, superimpose,
   -- -- ** Flipping
@@ -53,14 +55,25 @@ downsample :: ColorSpace cs e =>
            -> (Int -> Bool) -- ^ Columns predicate
            -> Image cs e -- ^ Source image
            -> Image cs e
-downsample mPred nPred (Image arr) =
-  makeImageC (A.getComp arr) (VU.length rowsIx :. VU.length colsIx) getNewPx
+downsample mPred nPred = traverse getNewDims getNewPx
   where
-    !(m :. n) = A.size arr
-    !rowsIx = VU.filter (not . mPred) $ VU.enumFromN 0 m
-    !colsIx = VU.filter (not . nPred) $ VU.enumFromN 0 n
-    getNewPx (i :. j) = A.unsafeIndex arr (VU.unsafeIndex rowsIx i :. VU.unsafeIndex colsIx j)
-{-# INLINE downsample #-}
+    getNewDims (m :. n) =
+      let rowsIx = VU.filter (not . mPred) $ VU.enumFromN 0 m
+          colsIx = VU.filter (not . nPred) $ VU.enumFromN 0 n
+          sz = VU.length rowsIx :. VU.length colsIx
+      in (sz, (rowsIx, colsIx))
+    {-# INLINE getNewDims #-}
+    getNewPx (rowsIx, colsIx) getPx (i :. j) =
+      getPx (VU.unsafeIndex rowsIx i :. VU.unsafeIndex colsIx j)
+    {-# INLINE getNewPx #-}
+-- downsample mPred nPred (Image arr) =
+--   makeImageC (A.getComp arr) (VU.length rowsIx :. VU.length colsIx) getNewPx
+--   where
+--     !(m :. n) = A.size arr
+--     !rowsIx = VU.filter (not . mPred) $ VU.enumFromN 0 m
+--     !colsIx = VU.filter (not . nPred) $ VU.enumFromN 0 n
+--     getNewPx (i :. j) = A.unsafeIndex arr (VU.unsafeIndex rowsIx i :. VU.unsafeIndex colsIx j)
+{-# INLINE [~1] downsample #-}
 
 
 -- | Upsample an image by inserting rows and columns with zero valued pixels
@@ -80,33 +93,61 @@ upsample :: ColorSpace cs e =>
          -> (Int -> (Int, Int))
          -> Image cs e
          -> Image cs e
-upsample defPx mAdd nAdd (Image arr) =
-  makeImageC
-    (A.getComp arr)
-    sz
-    (\(i :. j) ->
-       A.handleBorderIndex
-         (Fill defPx)
-         sz
-         (A.unsafeIndex arr)
-         (A.unsafeIndex rowsIx i :. A.unsafeIndex colsIx j))
+upsample defPx mAdd nAdd = traverse getNewDims getNewPx
   where
-    (m' :. n') = A.size arr
-    rowsInfoArr = A.makeArrayR A.U Seq m' ((bimap (max 0) (max 0)) . mAdd)
-    colsInfoArr = A.makeArrayR A.U Seq n' ((bimap (max 0) (max 0)) . nAdd)
-    m = A.sum (A.map (uncurry (+)) rowsInfoArr) + m'
-    n = A.sum (A.map (uncurry (+)) colsInfoArr) + n'
-    sz = m :. n
-    rowsIx = makeIndices rowsInfoArr m
-    colsIx = makeIndices colsInfoArr n
+    getNewDims (m' :. n') = (sz, (sz, rowsIx, colsIx))
+      where
+        rowsInfoArr = A.makeArrayR A.U Seq m' ((bimap (max 0) (max 0)) . mAdd)
+        colsInfoArr = A.makeArrayR A.U Seq n' ((bimap (max 0) (max 0)) . nAdd)
+        m = A.sum (A.map (uncurry (+)) rowsInfoArr) + m'
+        n = A.sum (A.map (uncurry (+)) colsInfoArr) + n'
+        sz = m :. n
+        rowsIx = makeIndices rowsInfoArr m
+        colsIx = makeIndices colsInfoArr n
+    {-# INLINE getNewDims #-}
+    getNewPx (sz, rowsIx, colsIx) getPx (i :. j) =
+      A.handleBorderIndex (Fill defPx) sz getPx (A.unsafeIndex rowsIx i :. A.unsafeIndex colsIx j)
+    {-# INLINE getNewPx #-}
     makeIndices a k =
       runST $ do
         marr <- A.unsafeThaw $ A.makeArrayR A.P Seq k (const (-1))
-        let writer ci i (l, r)
-              | l > 0 = writer (ci + l) i (0, r)
-              | otherwise = A.unsafeLinearWrite marr ci i >> return (ci + 1 + r)
+        let writer ci i (l, r) = do
+              A.unsafeLinearWrite marr (ci + l) i
+              return (ci + l + 1 + r)
         A.ifoldlM_ writer 0 a
         A.unsafeFreeze Seq marr
+    {-# INLINE makeIndices #-}
+{-# INLINE [~1] upsample #-}
+
+-- V new
+  -- makeImageC
+  --   (A.getComp arr)
+  --   sz
+  --   (\(i :. j) ->
+  --      A.handleBorderIndex
+  --        (Fill defPx)
+  --        sz
+  --        (A.unsafeIndex arr)
+  --        (A.unsafeIndex rowsIx i :. A.unsafeIndex colsIx j))
+  -- where
+  --   (m' :. n') = A.size arr
+  --   rowsInfoArr = A.makeArrayR A.U Seq m' ((bimap (max 0) (max 0)) . mAdd)
+  --   colsInfoArr = A.makeArrayR A.U Seq n' ((bimap (max 0) (max 0)) . nAdd)
+  --   m = A.sum (A.map (uncurry (+)) rowsInfoArr) + m'
+  --   n = A.sum (A.map (uncurry (+)) colsInfoArr) + n'
+  --   sz = m :. n
+  --   rowsIx = makeIndices rowsInfoArr m
+  --   colsIx = makeIndices colsInfoArr n
+  --   makeIndices a k =
+  --     runST $ do
+  --       marr <- A.unsafeThaw $ A.makeArrayR A.P Seq k (const (-1))
+  --       let writer ci i (l, r)
+  --             | l > 0 = writer (ci + l) i (0, r)
+  --             | otherwise = A.unsafeLinearWrite marr ci i >> return (ci + 1 + r)
+  --       A.ifoldlM_ writer 0 a
+  --       A.unsafeFreeze Seq marr
+
+-- V old
   -- traverse img (const (newM, newN)) getNewPx where
   -- !(m, n) = dims img
   -- validate !p@(pre, post)
@@ -132,39 +173,40 @@ upsample defPx mAdd nAdd (Image arr) =
   --     (Just i', Just j') -> getPx (i', j')
   --     _                  -> 0
   -- {-# INLINE getNewPx #-}
-{-# INLINE upsample #-}
+  --{-# INLINE [~1] upsample #-}
 
 
--- -- | Downsample an image by discarding every odd row.
--- downsampleRows :: Array arr cs e => Image arr cs e -> Image arr cs e
--- downsampleRows = downsample odd (const False)
--- {-# INLINE downsampleRows #-}
+-- | Downsample an image by discarding every odd row.
+downsampleRows :: ColorSpace cs e => Image cs e -> Image cs e
+downsampleRows = downsample odd (const False)
+{-# INLINE [~1] downsampleRows #-}
 
 
--- -- | Downsample an image by discarding every odd column.
--- downsampleCols :: Array arr cs e => Image arr cs e -> Image arr cs e
--- downsampleCols = downsample (const False) odd
--- {-# INLINE downsampleCols #-}
+-- | Downsample an image by discarding every odd column.
+downsampleCols :: ColorSpace cs e => Image cs e -> Image cs e
+downsampleCols = downsample (const False) odd
+{-# INLINE [~1] downsampleCols #-}
 
 
--- -- | Upsample an image by inserting a row of back pixels after each row of a
--- -- source image.
--- upsampleRows :: Array arr cs e => Image arr cs e -> Image arr cs e
--- upsampleRows = upsample (const (0, 1)) (const (0, 0))-- upsampleF (2, 1)
--- {-# INLINE upsampleRows #-}
+-- | Upsample an image by inserting a row of back pixels after each row of a
+-- source image.
+upsampleRows :: ColorSpace cs e => Image cs e -> Image cs e
+upsampleRows = upsample 0 (const (0, 1)) (const (0, 0))
+{-# INLINE [~1] upsampleRows #-}
 
 
--- -- | Upsample an image by inserting a column of back pixels after each column of a
--- -- source image.
--- upsampleCols :: Array arr cs e => Image arr cs e -> Image arr cs e
--- upsampleCols = upsample (const (0, 0)) (const (0, 1))-- upsampleF (2, 1)
--- {-# INLINE upsampleCols #-}
+-- | Upsample an image by inserting a column of back pixels after each column of a
+-- source image.
+upsampleCols :: ColorSpace cs e => Image cs e -> Image cs e
+upsampleCols = upsample 0 (const (0, 0)) (const (0, 1))
+{-# INLINE [~1] upsampleCols #-}
 
 
 
--- -- | Concatenate two images together into one. Both input images must have the
--- -- same number of rows.
--- leftToRight :: Array arr cs e => Image arr cs e -> Image arr cs e -> Image arr cs e
+-- | Append two images together into one horisontally. Both input images must have the
+-- same number of rows, otherwise error.
+leftToRight :: ColorSpace cs e => Image cs e -> Image cs e -> Image cs e
+leftToRight img1 img2 = computeI (A.append' 1 (delayI img1) (delayI img2))
 -- leftToRight !img1@(dims -> (_, n1)) !img2 = traverse2 img1 img2 newDims newPx where
 --   newDims !(m1, _) !(m2, n2)
 --     | m1 == m2  = (m1, n1 + n2)
@@ -173,12 +215,13 @@ upsample defPx mAdd nAdd (Image arr) =
 --   {-# INLINE newDims #-}
 --   newPx !getPx1 !getPx2 !(i, j) = if j < n1 then getPx1 (i, j) else getPx2 (i, j-n1)
 --   {-# INLINE newPx #-}
--- {-# INLINE leftToRight #-}
+{-# INLINE [~1] leftToRight #-}
 
 
--- -- | Concatenate two images together into one. Both input images must have the
--- -- same number of columns.
--- topToBottom :: Array arr cs e => Image arr cs e -> Image arr cs e -> Image arr cs e
+-- | Append two images together into one vertically. Both input images must have the
+-- same number of columns, otherwise error.
+topToBottom :: ColorSpace cs e => Image cs e -> Image cs e -> Image cs e
+topToBottom img1 img2 = computeI (A.append' 2 (delayI img1) (delayI img2))
 -- topToBottom !img1@(dims -> (m1, _)) !img2 = traverse2 img1 img2 newDims newPx where
 --   newDims !(_, n1) !(m2, n2)
 --     | n1 == n2  = (m1 + m2, n1)
@@ -187,7 +230,7 @@ upsample defPx mAdd nAdd (Image arr) =
 --   {-# INLINE newDims #-}
 --   newPx !getPx1 !getPx2 !(i, j) = if i < m1 then getPx1 (i, j) else getPx2 (i-m1, j)
 --   {-# INLINE newPx #-}
--- {-# INLINE topToBottom #-}
+{-# INLINE [~1] topToBottom #-}
 
 
 -- -- | Shift an image towards its bottom right corner by @(delatM, deltaN)@ rows and
@@ -284,7 +327,7 @@ upsample defPx mAdd nAdd (Image arr) =
 
 
 
--- flipUsing :: Array arr cs e =>
+-- flipUsing :: ColorSpace cs e =>
 --              ((Int, Int) -> (Int, Int) -> (Int, Int)) -> Image arr cs e -> Image arr cs e
 -- flipUsing getNewIndex !img@(dims -> sz) = backpermute sz (getNewIndex sz) img
 -- {-# INLINE flipUsing #-}

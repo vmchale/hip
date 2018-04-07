@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
+{-# LANGUAGE TypeFamilies          #-}
 -- |
 -- Module      : Graphics.Image.Internal
 -- Copyright   : (c) Alexey Kuleshevich 2016-2018
@@ -20,9 +21,10 @@ module Graphics.Image.Internal
   , delayI
   , makeImage
   , makeImageC
+  , fromLists
+  , toLists
   , fromArray
   , toArray
-  , getComp
   , setComp
   , dims
   , (!)
@@ -43,14 +45,16 @@ module Graphics.Image.Internal
   , foldMono
   ) where
 
+import           Control.DeepSeq
 import qualified Data.Massiv.Array        as A
 import           Data.Massiv.Array.Unsafe as A
 import           Data.Massiv.Core
 import           Data.Monoid
 import           Data.Typeable
+import           GHC.Exts                 (IsList (..))
 import           Graphics.ColorSpace
-import           Prelude                  as P hiding (map, zipWith, zipWith3, traverse)
-
+import           Prelude                  as P hiding (map, traverse, zipWith,
+                                                zipWith3)
 
 -- | Main data type of the library
 data Image cs e = Image !(Array A.S Ix2 (Pixel cs e))
@@ -118,6 +122,14 @@ instance (Floating e, ColorSpace cs e) => Floating (Image cs e) where
   {-# INLINE [~1] acosh #-}
 
 
+instance (NFData e, ColorSpace cs e) => NFData (Image cs e) where
+  rnf (Image arr) = rnf arr
+
+instance ColorSpace cs e => IsList (Image cs e) where
+  type Item (Image cs e) = [Pixel cs e]
+  fromList = fromLists
+  toList = toLists
+
 -- Below is the simplistic, yet very powerful HIP fusion guts:
 
 computeI :: ColorSpace cs e => Array A.D Ix2 (Pixel cs e) -> Image cs e
@@ -129,26 +141,22 @@ delayI (Image arr) = A.delay arr
 {-# INLINE [1] delayI #-}
 
 {-# RULES
-"delayI/computeI" forall arr . delayI (computeI arr) = arr
+"fuse delayI/computeI" forall arr . delayI (computeI arr) = arr
  #-}
 
-
+-- | Get image dimensions. Using this function will cause an image to be fully evaluated and will
+-- break the fusion at the call site, so it is recommended to avoid it in favor of `traverse` when
+-- possible.
 dims :: ColorSpace cs e => Image cs e -> Ix2
-dims = A.size . delayI
-{-# INLINE [~1] dims #-}
--- INVESTIGATE: Does `dims` break fusion. If so, check if making a copy of it in `Image` alleviates
--- the issue, otherwise document it.
--- CHECK if this approach is better: dims (Image arr) = A.size arr
+dims (Image arr) = A.size arr
+{-# INLINE dims #-}
+
 
 -- | By default all images are created with parallel computation strategy, but it can be changed
 -- with this function.
 setComp :: ColorSpace cs e => Comp -> Image cs e -> Image cs e
 setComp comp = computeI . A.setComp comp . delayI
 {-# INLINE [~1] setComp #-}
-
-getComp :: ColorSpace cs e => Image cs e -> Comp
-getComp = A.getComp . delayI
-{-# INLINE [~1] getComp #-}
 
 -- | Create a scalar image with only one element. Could be handy together with `liftArray2`
 -- function.
@@ -190,6 +198,27 @@ fromArray = Image . A.computeSource
 toArray :: Image cs e -> Array A.S Ix2 (Pixel cs e)
 toArray (Image arr) = arr
 {-# INLINE toArray #-}
+
+
+-- | Construct an image from a nested rectangular shaped list of pixels.  Length of an outer list
+-- will constitute @m@ rows, while the length of inner lists - @n@ columns. All of the inner lists
+-- must be of the same length, otherwise an error will be thrown.
+--
+-- >>> fromLists [[PixelY (fromIntegral (i*j) / 60000) | j <- [1..300]] | i <- [1..200]]
+--
+-- <<images/grad_fromLists.png>>
+--
+fromLists :: ColorSpace cs e => [[Pixel cs e]] -> Image cs e
+fromLists = Image . A.fromLists' Par
+{-# INLINE fromLists #-}
+
+
+-- | Convert an image into a nested lists of pixels
+--
+-- prop> img == fromLists (toLists img)
+toLists :: ColorSpace cs e => Image cs e -> [[Pixel cs e]]
+toLists (Image arr) = A.toLists arr
+{-# INLINE toLists #-}
 
 -- Indexing
 
@@ -295,9 +324,10 @@ transpose = computeI . A.transpose . delayI
 -- | Traverse an image
 traverse ::
      (ColorSpace cs' e', ColorSpace cs e)
-  => (Ix2 -> Ix2) -- ^ Function that takes source image dimensions and returns dimensions of a new
-                  -- image.
-  -> ((Ix2 -> Pixel cs' e') -> Ix2 -> Pixel cs e)
+  => (Ix2 -> (Ix2, a)) -- ^ Function that takes source image dimensions and returns dimensions of a
+                  -- new image as well as anything else that will be available to an indexing
+                  -- function.
+  -> (a -> (Ix2 -> Pixel cs' e') -> Ix2 -> Pixel cs e)
   -- ^ Function that receives a pixel getter (a source image index function), a location @(i :. j)@
   -- in a new image and returns a pixel for that location.
   -> Image cs' e' -- ^ Source image.
@@ -308,8 +338,9 @@ traverse fDim f = computeI . traverseArray fDim f . delayI
 -- | Create an image, same as `traverse`, except by traversing two source images.
 traverse2 ::
      (ColorSpace cs1 e1, ColorSpace cs2 e2, ColorSpace cs e)
-  => (Ix2 -> Ix2 -> Ix2) -- ^ Function that returns dimensions of a new image.
-  -> ((Ix2 -> Pixel cs1 e1) -> (Ix2 -> Pixel cs2 e2) -> Ix2 -> Pixel cs e)
+  => (Ix2 -> Ix2 -> (Ix2, a)) -- ^ Function that returns dimensions of a new image and other data
+                              -- for indexing function.
+  -> (a -> (Ix2 -> Pixel cs1 e1) -> (Ix2 -> Pixel cs2 e2) -> Ix2 -> Pixel cs e)
          -- ^ Function that receives pixel getters, a location @(i :. j)@ in a new image and returns a
          -- pixel for that location.
   -> Image cs1 e1 -- ^ First source image.
@@ -350,31 +381,44 @@ liftImage2 f img1 img2 = computeI $ liftArray2 f (delayI img1) (delayI img2)
 {-# INLINE [~1] liftImage2 #-}
 
 
--- Array functions.
-
 -- | Create an array by traversing a source array.
 traverseArray ::
      (Source r1 ix1 e1, Index ix)
-  => (ix1 -> ix)
-  -> ((ix1 -> e1) -> ix -> e)
+  => (ix1 -> (ix, a))
+  -> (a -> (ix1 -> e1) -> ix -> e)
   -> Array r1 ix1 e1
   -> Array A.D ix e
-traverseArray fSz f arr = A.makeArray (A.getComp arr) (fSz (A.size arr)) (f (A.evaluateAt arr))
+traverseArray fSz f arr = A.makeArray (A.getComp arr) sz (f a (A.evaluateAt arr))
+  where (sz, a) = fSz (A.size arr)
 {-# INLINE traverseArray #-}
+
+-- Array functions.
+
+-- -- | Create an array by traversing a source array.
+-- traverseArray ::
+--      (Source r1 ix1 e1, Index ix)
+--   => (ix1 -> ix)
+--   -> ((ix1 -> e1) -> ix -> e)
+--   -> Array r1 ix1 e1
+--   -> Array A.D ix e
+-- traverseArray fSz f arr = A.makeArray (A.getComp arr) (fSz (A.size arr)) (f (A.evaluateAt arr))
+-- {-# INLINE traverseArray #-}
 
 -- | Create an array, same as `traverseArray`, except by traversing two source arrays.
 traverseArray2
   :: (Source r1 ix1 e1, Source r2 ix2 e2, Index ix)
-  => (ix1 -> ix2 -> ix)
-  -> ((ix1 -> e1) -> (ix2 -> e2) -> ix -> e)
+  => (ix1 -> ix2 -> (ix, a))
+  -> (a -> (ix1 -> e1) -> (ix2 -> e2) -> ix -> e)
   -> Array r1 ix1 e1
   -> Array r2 ix2 e2
   -> Array A.D ix e
 traverseArray2 fSz f arr1 arr2 =
   A.makeArray
     (A.getComp arr1)
-    (fSz (A.size arr1) (A.size arr2))
-    (f (A.evaluateAt arr1) (A.evaluateAt arr2))
+    sz
+    (f a (A.evaluateAt arr1) (A.evaluateAt arr2))
+  where
+    (sz, a) = fSz (A.size arr1) (A.size arr2)
 {-# INLINE traverseArray2 #-}
 
 
