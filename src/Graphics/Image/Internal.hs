@@ -27,11 +27,6 @@ module Graphics.Image.Internal
   , toArray
   , setComp
   , dims
-  , (!)
-  , index
-  , maybeIndex
-  , defaultIndex
-  , borderIndex
   , map
   , imap
   , zipWith
@@ -40,16 +35,25 @@ module Graphics.Image.Internal
   , izipWith3
   , traverse
   , traverse2
-  , transpose
+  , transmute
+  , transmute2
+  , backpermute
+  -- , transmute3
   , fold
   , foldMono
+  , foldSemi
+  , foldSemi1
+  , maxPixel
+  , minPixel
+  , maxVal
+  , minVal
   ) where
 
 import           Control.DeepSeq
 import qualified Data.Massiv.Array        as A
 import           Data.Massiv.Array.Unsafe as A
 import           Data.Massiv.Core
-import           Data.Monoid
+import           Data.Semigroup
 import           Data.Typeable
 import           GHC.Exts                 (IsList (..))
 import           Graphics.ColorSpace
@@ -64,8 +68,8 @@ instance ColorSpace cs e => Show (Image cs e) where
   show img =
     let (m :. n) = dims img
     in "<Image " ++
-       showsTypeRep (typeRep (Proxy :: Proxy cs)) " (" ++
-       showsTypeRep (typeRep (Proxy :: Proxy e)) "): " ++ show m ++ "x" ++ show n ++ ">"
+       showsTypeRep (typeRep (Proxy :: Proxy cs)) " " ++
+       showsTypeRep (typeRep (Proxy :: Proxy e)) ": " ++ show m ++ "x" ++ show n ++ ">"
 
 instance ColorSpace cs e => Eq (Image cs e) where
   (==) img1 img2 = delayI img1 == delayI img2
@@ -151,6 +155,11 @@ dims :: ColorSpace cs e => Image cs e -> Ix2
 dims (Image arr) = A.size arr
 {-# INLINE dims #-}
 
+-- | Check if image is empty, i.e. at least one of its sides is equal to 0. Uses `dims` underneath.
+isEmpty :: ColorSpace cs e => Image cs e -> Bool
+isEmpty = (0 ==) . A.totalElem . dims
+{-# INLINE isEmpty #-}
+
 
 -- | By default all images are created with parallel computation strategy, but it can be changed
 -- with this function.
@@ -220,46 +229,6 @@ toLists :: ColorSpace cs e => Image cs e -> [[Pixel cs e]]
 toLists (Image arr) = A.toLists arr
 {-# INLINE toLists #-}
 
--- Indexing
-
--- | Get a pixel at @i@-th and @j@-th location.
---
--- >>> img = makeImage (200 :. 200) (\(i :. j) -> PixelY $ fromIntegral (i*j)) / (200*200)
--- >>> index img (20 :. 30)
--- <Luma:(1.5e-2)>
---
-index :: ColorSpace cs e => Image cs e -> Ix2 -> Pixel cs e
-index (Image arr) = A.index' arr
-{-# INLINE index #-}
-
-
--- | Infix synonym for `index`.
-(!) :: ColorSpace cs e => Image cs e -> Ix2 -> Pixel cs e
-(!) (Image arr) = A.index' arr
-{-# INLINE (!) #-}
-
-
--- | Image indexing function that returns a default pixel if index is out of bounds.
-defaultIndex :: ColorSpace cs e =>
-                Pixel cs e -> Image cs e -> Ix2 -> Pixel cs e
-defaultIndex px (Image arr) = A.defaultIndex px arr
-{-# INLINE defaultIndex #-}
-
-
--- | Image indexing function that uses a special border resolutions strategy for
--- out of bounds pixels.
-borderIndex :: ColorSpace cs e =>
-               Border (Pixel cs e) -> Image cs e -> Ix2 -> Pixel cs e
-borderIndex atBorder (Image arr) = A.borderIndex atBorder arr
-{-# INLINE borderIndex #-}
-
-
--- | Image indexing function that returns @'Nothing'@ if index is out of bounds,
--- @'Just' px@ otherwise.
-maybeIndex :: ColorSpace cs e =>
-              Image cs e -> Ix2 -> Maybe (Pixel cs e)
-maybeIndex (Image arr) = A.index arr
-{-# INLINE maybeIndex #-}
 
 
 
@@ -314,20 +283,12 @@ izipWith3 f img1 img2 img3 = computeI $ A.izipWith3 f (delayI img1) (delayI img2
 {-# INLINE [~1] izipWith3 #-}
 
 
--- | Transpose an image
-transpose :: ColorSpace cs e => Image cs e -> Image cs e
-transpose = computeI . A.transpose . delayI
-{-# INLINE [~1] transpose #-}
-
-
-
 -- | Traverse an image
 traverse ::
      (ColorSpace cs' e', ColorSpace cs e)
-  => (Ix2 -> (Ix2, a)) -- ^ Function that takes source image dimensions and returns dimensions of a
-                  -- new image as well as anything else that will be available to an indexing
-                  -- function.
-  -> (a -> (Ix2 -> Pixel cs' e') -> Ix2 -> Pixel cs e)
+  => (Ix2 -> Ix2) -- ^ Function that takes source image dimensions and returns dimensions of a new
+                  -- image.
+  -> ((Ix2 -> Pixel cs' e') -> Ix2 -> Pixel cs e)
   -- ^ Function that receives a pixel getter (a source image index function), a location @(i :. j)@
   -- in a new image and returns a pixel for that location.
   -> Image cs' e' -- ^ Source image.
@@ -338,6 +299,35 @@ traverse fDim f = computeI . traverseArray fDim f . delayI
 -- | Create an image, same as `traverse`, except by traversing two source images.
 traverse2 ::
      (ColorSpace cs1 e1, ColorSpace cs2 e2, ColorSpace cs e)
+  => (Ix2 -> Ix2 -> Ix2) -- ^ Function that returns dimensions of a new image.
+  -> ((Ix2 -> Pixel cs1 e1) -> (Ix2 -> Pixel cs2 e2) -> Ix2 -> Pixel cs e)
+         -- ^ Function that receives pixel getters, a location @(i :. j)@ in a new image and returns a
+         -- pixel for that location.
+  -> Image cs1 e1 -- ^ First source image.
+  -> Image cs2 e2 -- ^ Second source image.
+  -> Image cs e
+traverse2 fDims f img1 img2 = computeI $ traverseArray2 fDims f (delayI img1) (delayI img2)
+{-# INLINE [~1] traverse2 #-}
+
+
+-- | Sort of like `traverse`, but there is ability to use result of size generating function inside
+-- of the element generating function
+transmute ::
+     (ColorSpace cs' e', ColorSpace cs e)
+  => (Ix2 -> (Ix2, a)) -- ^ Function that takes source image dimensions and returns dimensions of a
+                  -- new image as well as anything else that will be available to an indexing
+                  -- function.
+  -> (a -> (Ix2 -> Pixel cs' e') -> Ix2 -> Pixel cs e)
+  -- ^ Function that receives a pixel getter (a source image index function), a location @(i :. j)@
+  -- in a new image and returns a pixel for that location.
+  -> Image cs' e' -- ^ Source image.
+  -> Image cs e
+transmute fDim f = computeI . transmuteArray fDim f . delayI
+{-# INLINE [~1] transmute #-}
+
+-- | Create an image, same as `transmute`, except by working on two source images.
+transmute2 ::
+     (ColorSpace cs1 e1, ColorSpace cs2 e2, ColorSpace cs e)
   => (Ix2 -> Ix2 -> (Ix2, a)) -- ^ Function that returns dimensions of a new image and other data
                               -- for indexing function.
   -> (a -> (Ix2 -> Pixel cs1 e1) -> (Ix2 -> Pixel cs2 e2) -> Ix2 -> Pixel cs e)
@@ -346,8 +336,28 @@ traverse2 ::
   -> Image cs1 e1 -- ^ First source image.
   -> Image cs2 e2 -- ^ Second source image.
   -> Image cs e
-traverse2 fDims f img1 img2 = computeI $ traverseArray2 fDims f (delayI img1) (delayI img2)
-{-# INLINE [~1] traverse2 #-}
+transmute2 fDims f img1 img2 = computeI $ transmuteArray2 fDims f (delayI img1) (delayI img2)
+{-# INLINE [~1] transmute2 #-}
+
+-- | Sort of like `traverse`, but there is ability to use result of size generating function inside
+-- of the element generating function
+backpermute ::
+     (ColorSpace cs e)
+  => (Ix2 -> (Ix2, a))
+  -- ^ Function that takes source image dimensions and returns dimensions of a new image as well as
+  -- anything else that will be available to an indexing function.
+  -> (a -> Ix2 -> Ix2)
+  -- ^ Function that maps an index of a result image to an index of a source image.
+  -> Image cs e -- ^ Source image.
+  -> Image cs e
+backpermute fDim f =
+  computeI .
+  (\arr ->
+     let (sz, a) = fDim (A.size arr)
+     in A.backpermute sz (f a) arr) .
+  delayI
+{-# INLINE [~1] backpermute #-}
+
 
 -- Folding
 
@@ -366,8 +376,57 @@ foldMono ::
   => (Pixel cs e -> m) -- ^ Function that converts every pixel in the image to a `Monoid`.
   -> Image cs e -- ^ Source image.
   -> m
-foldMono f = A.fold (<>) mempty . A.map f . delayI
+foldMono f = A.fold mappend mempty . A.map f . delayI
 {-# INLINE [~1] foldMono #-}
+
+
+-- | Semigroup reduction of an image.
+foldSemi ::
+     (Semigroup m, ColorSpace cs e)
+  => (Pixel cs e -> m) -- ^ Function that converts every pixel in the image to a `Semigroup`.
+  -> m -- ^ Initial Element
+  -> Image cs e -- ^ Source image.
+  -> m
+foldSemi f m = A.fold (<>) m . A.map f . delayI
+{-# INLINE [~1] foldSemi #-}
+
+
+-- | Semigroup reduction of a non-empty image, while using the 0th pixel as initial element.
+foldSemi1 ::
+     (Semigroup m, ColorSpace cs e)
+  => (Pixel cs e -> m) -- ^ Function that converts every pixel in the image to a `Semigroup`.
+  -> Image cs e -- ^ Source image.
+  -> m
+foldSemi1 f = (\arr -> A.fold (<>) (f (A.evaluateAt arr 0)) (A.map f arr)) . delayI
+{-# INLINE [~1] foldSemi1 #-}
+
+-- | Find the largest pixel. Throws an error on empty (see `isEmpty`) images.
+maxPixel ::
+     (Ord (Pixel cs e), ColorSpace cs e)
+  => Image cs e -- ^ Source image.
+  -> Pixel cs e
+maxPixel = getMax . foldSemi1 Max
+{-# INLINE [~1] maxPixel #-}
+
+-- | Find the largest pixel. Throws an error on empty (see `isEmpty`) images.
+minPixel ::
+     (Ord (Pixel cs e), ColorSpace cs e)
+  => Image cs e -- ^ Source image.
+  -> Pixel cs e
+minPixel = getMin . foldSemi1 Min
+{-# INLINE [~1] minPixel #-}
+
+-- | Find the largest channel value among all pixels in the image. Throws an error on empty (see
+-- `isEmpty`) images.
+maxVal :: (Ord e, ColorSpace cs e) => Image cs e -> e
+maxVal = A.maximum . A.map (foldl1 max) . delayI
+{-# INLINE [~1] maxVal #-}
+
+-- | Find the smallest channel value among all pixels in the image. Throws an error on empty (see
+-- `isEmpty`) images.
+minVal :: (Ord e, ColorSpace cs e) => Image cs e -> e
+minVal = A.minimum . A.map (foldl1 min) . delayI
+{-# INLINE [~1] minVal #-}
 
 
 -- Lifting
@@ -380,47 +439,62 @@ liftImage2 :: (ColorSpace cs1 e1, ColorSpace cs2 e2, ColorSpace cs e) =>
 liftImage2 f img1 img2 = computeI $ liftArray2 f (delayI img1) (delayI img2)
 {-# INLINE [~1] liftImage2 #-}
 
-
--- | Create an array by traversing a source array.
-traverseArray ::
-     (Source r1 ix1 e1, Index ix)
-  => (ix1 -> (ix, a))
-  -> (a -> (ix1 -> e1) -> ix -> e)
-  -> Array r1 ix1 e1
-  -> Array A.D ix e
-traverseArray fSz f arr = A.makeArray (A.getComp arr) sz (f a (A.evaluateAt arr))
-  where (sz, a) = fSz (A.size arr)
-{-# INLINE traverseArray #-}
-
 -- Array functions.
 
--- -- | Create an array by traversing a source array.
--- traverseArray ::
---      (Source r1 ix1 e1, Index ix)
---   => (ix1 -> ix)
---   -> ((ix1 -> e1) -> ix -> e)
---   -> Array r1 ix1 e1
---   -> Array A.D ix e
--- traverseArray fSz f arr = A.makeArray (A.getComp arr) (fSz (A.size arr)) (f (A.evaluateAt arr))
--- {-# INLINE traverseArray #-}
+-- | Create a new array by using size and indexing function of a source array.
+transmuteArray ::
+     (Source r Ix2 e1)
+  => (Ix2 -> (Ix2, a))
+  -> (a -> (Ix2 -> e1) -> Ix2 -> e)
+  -> Array r Ix2 e1
+  -> Array A.D Ix2 e
+transmuteArray fSz f arr = A.makeArray (A.getComp arr) sz (f a (A.evaluateAt arr))
+  where (sz, a) = fSz (A.size arr)
+{-# INLINE transmuteArray #-}
 
--- | Create an array, same as `traverseArray`, except by traversing two source arrays.
-traverseArray2
-  :: (Source r1 ix1 e1, Source r2 ix2 e2, Index ix)
-  => (ix1 -> ix2 -> (ix, a))
-  -> (a -> (ix1 -> e1) -> (ix2 -> e2) -> ix -> e)
-  -> Array r1 ix1 e1
-  -> Array r2 ix2 e2
-  -> Array A.D ix e
-traverseArray2 fSz f arr1 arr2 =
+
+-- | Create an array, same as `transmuteArray`, except by traversing two source arrays.
+transmuteArray2
+  :: (Source r1 Ix2 e1, Source r2 Ix2 e2)
+  => (Ix2 -> Ix2 -> (Ix2, a))
+  -> (a -> (Ix2 -> e1) -> (Ix2 -> e2) -> Ix2 -> e)
+  -> Array r1 Ix2 e1
+  -> Array r2 Ix2 e2
+  -> Array A.D Ix2 e
+transmuteArray2 fSz f arr1 arr2 =
   A.makeArray
     (A.getComp arr1)
     sz
     (f a (A.evaluateAt arr1) (A.evaluateAt arr2))
   where
     (sz, a) = fSz (A.size arr1) (A.size arr2)
-{-# INLINE traverseArray2 #-}
+{-# INLINE transmuteArray2 #-}
 
+
+-- | Create an array by traversing a source array.
+traverseArray ::
+     (Source r1 Ix2 e1)
+  => (Ix2 -> Ix2)
+  -> ((Ix2 -> e1) -> Ix2 -> e)
+  -> Array r1 Ix2 e1
+  -> Array A.D Ix2 e
+traverseArray fSz f = transmuteArray (\sz -> (fSz sz, ())) (const f)
+{-# INLINE traverseArray #-}
+
+-- | Create an array, same as `traverseArray`, except by traversing two source arrays.
+traverseArray2
+  :: (Source r1 ix1 e1, Source r2 ix2 e2, Index ix)
+  => (ix1 -> ix2 -> ix)
+  -> ((ix1 -> e1) -> (ix2 -> e2) -> ix -> e)
+  -> Array r1 ix1 e1
+  -> Array r2 ix2 e2
+  -> Array A.D ix e
+traverseArray2 fSz f arr1 arr2 =
+  A.makeArray
+    (A.getComp arr1)
+    (fSz (A.size arr1) (A.size arr2))
+    (f (A.evaluateAt arr1) (A.evaluateAt arr2))
+{-# INLINE traverseArray2 #-}
 
 -- | TODO: expose liftArray2 as internal in massiv.
 liftArray2

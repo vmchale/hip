@@ -1,5 +1,6 @@
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE BangPatterns          #-}
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 -- |
 -- Module      : Graphics.Image.Processing.Complex
 -- Copyright   : (c) Alexey Kuleshevich 2016-2018
@@ -8,9 +9,9 @@
 -- Stability   : experimental
 -- Portability : non-portable
 --
-module Graphics.Image.Processing.Complex (
-  -- * Rectangular form
-  (!+!)
+module Graphics.Image.Processing.Complex
+  ( -- * Rectangular form
+    (!+!)
   , realPartI
   , imagPartI
   -- * Polar form
@@ -18,17 +19,18 @@ module Graphics.Image.Processing.Complex (
   , cisI
   , polarI
   , magnitudeI
-  , phaseI,
+  , phaseI
   -- * Conjugate
-  conjugateI
-  -- ** Fourier Transform
-  --fft, ifft
+  , conjugateI
+  -- ** Fast Fourier Transform
+  , fft
+  , ifft
   ) where
 
-import Prelude hiding (map, zipWith)
-import Graphics.Image.Internal
-import Graphics.ColorSpace.Complex
---import Graphics.Image.Processing.Complex.Fourier
+import           Graphics.ColorSpace.Complex
+import           Graphics.Image.Internal
+import           Graphics.Image.Processing.Complex.Fourier
+import           Prelude                                   hiding (map, zipWith)
 
 
 infix 6 !+!

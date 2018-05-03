@@ -15,32 +15,36 @@ module Graphics.Image.Processing.Complex.Fourier (
   fft, ifft, isPowerOfTwo
   ) where
 
-import           Data.Bits                           ((.&.))
-import           Graphics.Image.ColorSpace.Complex
-import           Graphics.Image.Interface            as I
-import           Graphics.Image.Processing.Geometric (leftToRight)
-import           Prelude                             as P
+import           Data.Bits                   ((.&.))
+import qualified Data.Massiv.Array           as A
+import qualified Data.Massiv.Array.Unsafe    as A
+import           Graphics.ColorSpace.Complex
+import           Graphics.Image.Internal     as I
+import           Prelude                     as P
 
 
 data Mode = Forward
           | Inverse
 
 -- | Fast Fourier Transform
-fft :: (Applicative (Pixel cs),
-        Array arr cs (Complex e), ColorSpace cs e,
+fft :: (ColorSpace cs (Complex e), ColorSpace cs e,
         Fractional (Pixel cs (Complex e)), Floating (Pixel cs e), RealFloat e) =>
-       Image arr cs (Complex e)
-    -> Image arr cs (Complex e)
+       Image cs (Complex e)
+    -> Image cs (Complex e)
 fft = fft2d Forward
 {-# INLINEABLE fft #-}
 
 
 -- | Inverse Fast Fourier Transform
-ifft :: (Applicative (Pixel cs),
-         Array arr cs (Complex e), ColorSpace cs e,
-         Fractional (Pixel cs (Complex e)), Floating (Pixel cs e), RealFloat e) =>
-        Image arr cs (Complex e)
-     -> Image arr cs (Complex e)
+ifft ::
+     ( ColorSpace cs (Complex e)
+     , ColorSpace cs e
+     , Fractional (Pixel cs (Complex e))
+     , Floating (Pixel cs e)
+     , RealFloat e
+     )
+  => Image cs (Complex e)
+  -> Image cs (Complex e)
 ifft = fft2d Inverse
 {-# INLINEABLE ifft #-}
 
@@ -58,14 +62,18 @@ isPowerOfTwo n = n /= 0 && (n .&. (n-1)) == 0
 
 
 -- | Compute the DFT of a matrix. Array dimensions must be powers of two else `error`.
-fft2d :: (Applicative (Pixel cs),
-          Array arr cs (Complex e), ColorSpace cs e,
-          Fractional (Pixel cs (Complex e)), Floating (Pixel cs e), RealFloat e) =>
-         Mode
-      -> Image arr cs (Complex e)
-      -> Image arr cs (Complex e)
-fft2d !mode !img =
-  let !(m, n) = dims img
+fft2d ::
+     ( ColorSpace cs (Complex e)
+     , ColorSpace cs e
+     , Fractional (Pixel cs (Complex e))
+     , Floating (Pixel cs e)
+     , RealFloat e
+     )
+  => Mode
+  -> Image cs (Complex e)
+  -> Image cs (Complex e)
+fft2d !mode img@(Image arr) =
+  let (m :. n) = A.size arr
       !sign = signOfMode mode
       !factor = fromIntegral (m * n)
   in if not (isPowerOfTwo m && isPowerOfTwo n)
@@ -75,59 +83,45 @@ fft2d !mode !img =
               , "  Array dimensions must be powers of two,"
               , "  but the provided image is " ++ show img ++ "."
               ]
-       else compute $
+       else Image $
             case mode of
-              Forward -> fftGeneral sign $ fftGeneral sign img
-              Inverse ->
-                I.map (/ factor) $ fftGeneral sign $ fftGeneral sign img
+              Forward -> fftArray sign $ fftArray sign arr
+              Inverse -> A.compute $ A.map (/ factor) $ fftArray sign $ fftArray sign arr
 {-# INLINE fft2d #-}
 
 
-fftGeneral
-  :: forall arr cs e.
-     ( Applicative (Pixel cs)
-     , Array arr cs (Complex e)
-     , ColorSpace cs e
-     , Floating (Pixel cs e)
-     , RealFloat e
-     )
-  => Pixel cs e -> Image arr cs (Complex e) -> Image arr cs (Complex e)
-fftGeneral !sign !img = transpose $ go n 0 1
+fftArray ::
+     (ColorSpace cs (Complex e), ColorSpace cs e, Floating (Pixel cs e), RealFloat e)
+  => Pixel cs e
+  -> A.Array A.S Ix2 (Pixel cs (Complex e))
+  -> A.Array A.S Ix2 (Pixel cs (Complex e))
+fftArray !sign arr = A.compute (A.transpose (go n 0 1))
   where
-    imgM :: Image (Manifest arr) cs (Complex e)
-    !imgM = toManifest img
-    !(m, n) = dims img
+    (m :. n) = A.size arr
     go !len !offset !stride
-      | len == 2 = compute $ makeImage (m, 2) swivel
+      | len == 2 = A.makeArray (A.getComp arr) (m :. 2) swivel
       | otherwise =
-        compute
-          (combine
-             len
-             (go (len `div` 2) offset (stride * 2))
-             (go (len `div` 2) (offset + stride) (stride * 2)))
+        A.computeAs A.S $
+        combine
+          len
+          (go (len `div` 2) offset (stride * 2))
+          (go (len `div` 2) (offset + stride) (stride * 2))
       where
-        swivel !(i, j) =
+        swivel (i :. j) =
           case j of
-            0 ->
-              unsafeIndex imgM (i, offset) +
-              unsafeIndex imgM (i, offset + stride)
-            1 ->
-              unsafeIndex imgM (i, offset) -
-              unsafeIndex imgM (i, offset + stride)
-            _ ->
-              error
-                "FFT: Image must have exactly 2 columns. Please, report this bug."
+            0 -> A.unsafeIndex arr (i :. offset) + A.unsafeIndex arr (i :. offset + stride)
+            1 -> A.unsafeIndex arr (i :. offset) - A.unsafeIndex arr (i :. offset + stride)
+            _ -> error "FFT: Image must have exactly 2 columns. Please, report this bug."
         {-# INLINE swivel #-}
-    combine !len' !evens !odds =
-      let !odds' =
-            compute $ I.imap (\ !(_, j) !px -> twiddle sign j len' * px) odds
-      in leftToRight (evens + odds') (evens - odds')
+    combine !len !evens !odds =
+      let !odds' = A.computeAs A.S $ A.imap (\(_ :. j) px -> twiddle sign j len * px) odds
+      in A.append' 1 (A.zipWith (+) evens odds') (A.zipWith (-) evens odds')
     {-# INLINE combine #-}
-{-# INLINE fftGeneral #-}
+{-# INLINE fftArray #-}
 
 
 -- Compute a twiddle factor.
-twiddle :: (Applicative (Pixel cs), Floating (Pixel cs e)) =>
+twiddle :: (ColorSpace cs e, Floating (Pixel cs e)) =>
            Pixel cs e
         -> Int                  -- index
         -> Int                  -- length

@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# OPTIONS_GHC -fno-warn-duplicate-exports #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -18,7 +19,7 @@
 -- representation, which is hidden from the user. At the same time it means all of the images are
 -- backed by pinned memory, therefore all computations are performed efficiently.
 --
--- * @ __'Image' cs e__ @, where @__cs__@ is the `ColorSpace` of an image and @__e__@ is the type
+-- * @__'Image' cs e__@, where @__cs__@ is the `ColorSpace` of an image and @__e__@ is the type
 -- denoting precision of an image (@Int@, @Word@, @Double@, etc.) .
 --
 -- Many of the function names exported by this module will clash with the ones from "Prelude", hence
@@ -80,12 +81,14 @@ module Graphics.Image
   -- <<images/cluster.jpg>> <<images/centaurus.jpg>> <<images/centaurus_and_cluster.jpg>>
   --
   , readImage
+  , readImageAuto
   , readImageY
   , readImageYA
   , readImageRGB
   , readImageRGBA
   -- ** Writing
   , writeImage
+  , writeImageAuto
   , displayImage
   -- * Accessors
   -- ** Dimensions
@@ -94,10 +97,15 @@ module Graphics.Image
   , dims
   -- ** Indexing
   , (!)
+  , (!?)
   , index
   , maybeIndex
   , defaultIndex
   , borderIndex
+  , Border(..)
+  -- *** Tuple conversion
+  , A.fromIx2
+  , A.toIx2
   -- * Transformation
   -- ** Pointwise
   , map
@@ -111,7 +119,6 @@ module Graphics.Image
   , traverse2
   , transpose
   , module Graphics.Image.Processing
-  -- backpermute,
   -- (|*|),
   -- * Reduction
   , fold
@@ -131,7 +138,7 @@ import           Data.Semigroup
 import           Graphics.ColorSpace
 import           Graphics.Image.Internal   as I
 import           Graphics.Image.IO         as I
-import           Graphics.Image.Processing
+import           Graphics.Image.Processing as IP
 import           Prelude                   as P hiding (map, maximum, minimum,
                                                  product, sum, traverse,
                                                  zipWith, zipWith3)
@@ -174,11 +181,11 @@ import Data.Foldable (foldl1)
 -- makeImageR _ = I.makeImage
 -- {-# INLINE makeImageR #-}
 
--- | Get the number of rows in an image.
+-- | Get the number of rows in an image. Same as `dims`, it does break fusion.
 --
--- >>> frog <- readImageRGB VU "images/frog.jpg"
+-- >>> frog <- readImageRGB "images/frog.jpg"
 -- >>> frog
--- <Image VectorUnboxed RGB (Double): 200x320>
+-- <Image RGB Double: 200x320>
 -- >>> rows frog
 -- 200
 --
@@ -187,11 +194,11 @@ rows img = let (m :. _) = dims img in m
 {-# INLINE rows #-}
 
 
--- | Get the number of columns in an image.
+-- | Get the number of columns in an image. Same as `dims`, it does break fusion.
 --
 -- >>> frog <- readImageRGB "images/frog.jpg"
 -- >>> frog
--- <Image VectorUnboxed RGB (Double): 200x320>
+-- <Image RGB Double: 200x320>
 -- >>> cols frog
 -- 320
 --
@@ -199,6 +206,59 @@ cols :: ColorSpace cs e => Image cs e -> Int
 cols img = let (_ :. n) = dims img in n
 {-# INLINE cols #-}
 
+
+--------------
+-- Indexing --
+--------------
+
+-- | Get a pixel at @i@-th and @j@-th location.
+--
+-- >>> img = makeImage (200 :. 200) (\(i :. j) -> PixelY $ fromIntegral (i*j)) / (200*200)
+-- >>> index img (20 :. 30)
+-- <Luma:(1.5e-2)>
+--
+index :: ColorSpace cs e => Image cs e -> Ix2 -> Pixel cs e
+index (Image arr) = A.index' arr
+{-# INLINE index #-}
+
+
+-- | Infix synonym for `index`.
+(!) :: ColorSpace cs e => Image cs e -> Ix2 -> Pixel cs e
+(!) (Image arr) = A.index' arr
+{-# INLINE (!) #-}
+
+
+-- | Image indexing function that returns a default pixel if index is out of bounds.
+defaultIndex :: ColorSpace cs e =>
+                Pixel cs e -> Image cs e -> Ix2 -> Pixel cs e
+defaultIndex px (Image arr) = A.defaultIndex px arr
+{-# INLINE defaultIndex #-}
+
+
+-- | Image indexing function that uses a special border resolutions strategy for
+-- out of bounds pixels.
+borderIndex :: ColorSpace cs e =>
+               Border (Pixel cs e) -> Image cs e -> Ix2 -> Pixel cs e
+borderIndex atBorder (Image arr) = A.borderIndex atBorder arr
+{-# INLINE borderIndex #-}
+
+
+-- | Image indexing function that returns @'Nothing'@ if index is out of bounds,
+-- @'Just' px@ otherwise.
+maybeIndex :: ColorSpace cs e =>
+              Image cs e -> Ix2 -> Maybe (Pixel cs e)
+maybeIndex (Image arr) = A.index arr
+{-# INLINE maybeIndex #-}
+
+-- | Infix synonym for `maybeIndex`.
+(!?) :: ColorSpace cs e => Image cs e -> Ix2 -> Maybe (Pixel cs e)
+(!?) (Image arr) = A.index arr
+{-# INLINE (!?) #-}
+
+
+-------------
+-- Folding --
+-------------
 
 -- | Sum all pixels in the image.
 sum :: ColorSpace cs e => Image cs e -> Pixel cs e
@@ -225,9 +285,9 @@ minimum = A.minimum . delayI
 
 
 -- | Scales all of the pixels to be in the range @[0, 1]@.
-normalize :: (ColorSpace cs e, Bounded e, Ord e, Fractional e) =>
+normalize :: (ColorSpace cs e, Ord e, Fractional e) =>
              Image cs e -> Image cs e
-normalize img =
+normalize !img =
   if l == s
     then (if s < 0
             then (* 0)
@@ -237,18 +297,17 @@ normalize img =
            img
     else I.map (fmap (\ e -> (e - s) / (l - s))) img
   where
-    l = getMax $ foldMono (Max . foldl1 max) img
-    s = getMin $ foldMono (Min . foldl1 min) img
+    !l = maxVal img
+    !s = minVal img
 {-# INLINE normalize #-}
 
-
--- -- | Check weather two images are equal within a tolerance. Useful for comparing
--- -- images with `Float` or `Double` precision.
--- eqTol
---   :: (Array X Bit, Array arr cs e, Ord e) =>
---      e -> Image arr cs e -> Image arr cs e -> Bool
--- eqTol !tol !img1 = IP.and . toImageBinaryUsing2 (eqTolPx tol) img1
--- {-# INLINE eqTol #-}
+-- | Check weather two images are equal within a tolerance. Useful for comparing
+-- images with `Float` or `Double` precision.
+eqTol
+  :: (ColorSpace cs e, Ord e) =>
+     e -> Image cs e -> Image cs e -> Bool
+eqTol !tol !img1 = IP.and . thresholdWith2 (eqTolPx tol) img1
+{-# INLINE eqTol #-}
 
 
 

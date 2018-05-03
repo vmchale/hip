@@ -54,7 +54,7 @@ displayImage (Image arr) = liftIO $ A.displayImage arr
 -- space and precision of the result array must match exactly that of the actual image, in order to
 -- apply auto conversion use `readImageAuto` instead.
 --
--- Might throw `A.ConvertError`, `A.DecodeError` and other standard errors related to file IO.
+-- Might throw `A.ConvertError`, `A.DecodeError`, besides other standard errors related to file IO.
 --
 -- Resulting image will be read as specified by the type signature:
 --
@@ -107,9 +107,9 @@ readImageRGBA = readImageAuto
 -- | Inverse of the 'readImage', but similarly to it, will guess an output file format from the file
 -- extension and will write to file any image with the colorspace that is supported by that
 -- format. Precision of the image might be adjusted using `Elevator` whenever precision of the
--- source image is not supported by the image file format. For instance, <'Image' 'RGBA' 'Double'>
--- being saved as 'PNG' file would be written as <'Image' 'RGBA' 'Word16'>, thus using highest
--- supported precision 'Word16' for that format. If automatic colors space conversion is also
+-- source image is not supported by the image file format. For instance, @`Image` `RGBA` `Double`@
+-- being saved as 'PNG' file would be written as @`Image` `RGBA` `Word16`@, thus using highest
+-- supported precision `Word16` for that format. If automatic colors space conversion is also
 -- desired, `writeImageAuto` can be used instead.
 --
 -- Can throw `A.ConvertError`, `A.EncodeError` and other usual IO errors.
