@@ -59,7 +59,7 @@ library
                   , Graphics.Image.Processing.Interpolation
   ghc-options:     -Wall
 
-test-suite hip-tests
+test-suite tests
   type:               exitcode-stdio-1.0
   hs-source-dirs:     tests
   main-is:            Spec.hs

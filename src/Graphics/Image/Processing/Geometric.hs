@@ -74,17 +74,17 @@ downsample mPred nPred = transmute getNewDims getNewPx
           sz = VU.length rowsIx :. VU.length colsIx
       in (sz, (rowsIx, colsIx))
     {-# INLINE getNewDims #-}
-    getNewPx (rowsIx, colsIx) getPx (i :. j) =
+    getNewPx !(rowsIx, colsIx) getPx (i :. j) =
       getPx (VU.unsafeIndex rowsIx i :. VU.unsafeIndex colsIx j)
     {-# INLINE getNewPx #-}
 {-# INLINE [~1] downsample #-}
 
 
--- | Upsample an image by inserting rows and columns with zero valued pixels
--- into an image. Supplied functions specify how many rows/columns shoud be
--- inserted @(before, after)@ a particular row/column. Returning a negative
--- value in a tuple will result in an error. E.g. insert 2 columns before and 4
--- columns after every 10th column, while leaving rows count unchanged:
+-- | Upsample an image by inserting rows and columns with default pixel into an image. Supplied
+-- functions specify how many rows/columns shoud be inserted @(before, after)@ a particular
+-- row/column. Returning a negative value in a tuple will result in no upsampling for that
+-- row. E.g. insert 2 columns before and 4 columns after every 10th column, while leaving rows count
+-- unchanged:
 --
 -- >>> frog <- readImageRGB "images/frog.jpg"
 -- >>> displayImage $ upsample (const (0, 0)) (\ k -> if k `mod` 10 == 0 then (2, 4) else (0, 0)) frog
@@ -92,10 +92,11 @@ downsample mPred nPred = transmute getNewDims getNewPx
 -- <<images/frog.jpg>> <<images/frog_upsampled.jpg>>
 --
 upsample :: ColorSpace cs e =>
-            Pixel cs e
-         -> (Int -> (Int, Int))
-         -> (Int -> (Int, Int))
-         -> Image cs e
+            Pixel cs e -- ^ Pixel to use for upsampling
+         -> (Int -> (Int, Int)) -- ^ How many rows to insert @(above, below)@ a particular row.
+         -> (Int -> (Int, Int)) -- ^ How many columns to insert to the @(left, right)@ of a
+                                -- particular column.
+         -> Image cs e -- ^ Source image
          -> Image cs e
 upsample defPx mAdd nAdd = transmute getNewDims getNewPx
   where
@@ -192,9 +193,8 @@ translate atBorder fDeltaSz =
 {-# INLINE [~1] translate #-}
 
 
--- | Change the size of an image. Pixel values and positions will not change,
--- except the ones outside the border, which are handled according to supplied
--- resolution strategy.
+-- | Change the size of an image. Pixel values and positions will not change, except the ones
+-- outside the border, which are handled according to supplied resolution strategy.
 --
 -- <<images/logo_40.png>>
 --
@@ -220,9 +220,9 @@ canvasSize atBorder fSz =
     A.handleBorderIndex atBorder sz getPx (i - dm :. j - dn)
 {-# INLINE [~1] canvasSize #-}
 
--- | Crop an image, i.e. retrieves a sub-image image with @m@ rows and @n@
--- columns. Make sure @(i + m, j + n)@ is not greater than dimensions of a
--- source image, otherwise it will result in an error.
+-- | Crop an image, i.e. retrieves a sub-image image with @m@ rows and @n@ columns, starting at @i@
+-- and @j@ pixel. Make sure @(i + m :. j + n)@ is not greater than dimensions of a source image,
+-- otherwise it will result in an error.
 --
 -- >>> frog <- readImageRGB "images/frog.jpg"
 -- >>> writeImage "images/frog_crop.jpg" $ crop (30 :. 80) (const 70) frog
@@ -231,12 +231,17 @@ canvasSize atBorder fSz =
 --
 crop ::
      ColorSpace cs e
-  => Ix2 -- ^ @(i `:.` j)@ starting index from within a source image.
-  -> (Ix2 -> Ix2) -- ^ Takes dimensions of source image as an argument and returns @(m `:.` n)@
-                  -- dimensions of a new image.
+  => (Ix2 -> (Ix2, Ix2))
+  -- ^ Takes dimensions of the source image as an argument and returns @(i `:.` j)@ starting index from
+  -- within a source image as well as @(m `:.` n)@ dimensions of a new image.
   -> Image cs e -- ^ Source image.
   -> Image cs e
-crop ix0 fSz = computeI . (\ arr -> A.extract' ix0 (fSz (A.size arr)) arr) . delayI
+crop fSz =
+  computeI .
+  (\arr ->
+     let !(ix0, sz) = fSz (A.size arr)
+     in A.extract' ix0 sz arr) .
+  delayI
 {-# INLINE [~1] crop #-}
 
 

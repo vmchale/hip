@@ -118,7 +118,7 @@ module Graphics.Image
   , traverse
   , traverse2
   , transpose
-  , module Graphics.Image.Processing
+  , module IP
   -- (|*|),
   -- * Reduction
   , fold

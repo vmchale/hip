@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -46,37 +47,36 @@ prop_sampleRows img = img == downsampleRows (upsampleRows img)
 prop_sampleCols :: Image Y Double -> Bool
 prop_sampleCols img = img == downsampleCols (upsampleCols img)
 
--- prop_upsampleNegative :: NonNegative Int -> NonNegative Int
---                       -> NonNegative Int -> NonNegative Int
---                       -> Image Y Double -> Property
--- prop_upsampleNegative (NonNegative p1) (NonNegative p2) (NonNegative p3) (NonNegative p4) img =
---   p1 /= 0 && p2 /= 0 && p3 /= 0 && p4 /= 0 ==>
---   expectFailure (upsample (const (-p1, -p2)) (const (-p3, -p4)) img `seq` True)
+prop_upsampleNegative :: Positive Int -> Positive Int
+                      -> Positive Int -> Positive Int
+                      -> Image Y Double -> Property
+prop_upsampleNegative (Positive p1) (Positive p2) (Positive p3) (Positive p4) img =
+  img === upsample 0 (const (-p1, -p2)) (const (-p3, -p4)) img
 
--- prop_upsampleId :: Image Y Double -> Bool
--- prop_upsampleId img = img == upsample (const (0,0)) (const (0,0)) img
+prop_upsampleId :: Image Y Double -> Bool
+prop_upsampleId img = img == upsample 0 (const (0,0)) (const (0,0)) img
 
 prop_downsampleId :: Image Y Double -> Bool
 prop_downsampleId img = img == downsample (const False) (const False) img
 
--- prop_sampleEven :: Image Y Double -> Bool
--- prop_sampleEven img = img == downsample even even (upsample (const (1,0)) (const (1,0)) img)
+prop_sampleEven :: Image Y Double -> Bool
+prop_sampleEven img = img == downsample even even (upsample 0 (const (1,0)) (const (1,0)) img)
 
--- prop_sampleOdd :: Image Y Double -> Bool
--- prop_sampleOdd img = img == downsample odd odd (upsample (const (0,1)) (const (0,1)) img)
+prop_sampleOdd :: Image Y Double -> Bool
+prop_sampleOdd img = img == downsample odd odd (upsample 0 (const (0,1)) (const (0,1)) img)
 
 -- prop_translateWrap :: (Int, Int) -> Image RGB Double -> Bool
 -- prop_translateWrap shift img = translateWrap shift img == translate Wrap shift img
 
--- prop_cropSuperimpose :: (Positive (Small Int), Positive (Small Int))
---                      -> (Positive (Small Int), Positive (Small Int))
---                      -> Image Y Double -> Bool
--- prop_cropSuperimpose (Positive (Small iA), Positive (Small jA)) (Positive (Small mA), Positive (Small nA)) img =
---   img == superimpose (i0, j0) (crop (i0, j0) (m', n') img) img
---   where
---     (m, n) = I.dims img
---     (i0, j0) = (iA `mod` m, jA `mod` n)
---     (m', n') = (1 + mA `mod` (m - i0), 1 + nA `mod` (n - j0))
+prop_cropSuperimpose :: (Positive (Small Int), Positive (Small Int))
+                     -> (Positive (Small Int), Positive (Small Int))
+                     -> Image Y Double -> Property
+prop_cropSuperimpose (Positive (Small iA), Positive (Small jA)) (Positive (Small mA), Positive (Small nA)) img =
+  m /= 0 && n /= 0 ==> img === superimpose ix0 (crop (const (ix0, sz)) img) img
+  where
+    (m :. n) = I.dims img
+    ix0@(i0 :. j0) = (iA `mod` m) :. (jA `mod` n)
+    sz = (1 + mA `mod` (m - i0)) :. (1 + nA `mod` (n - j0))
 
 prop_concatRotate :: Image Y Word8 -> Bool
 prop_concatRotate img =
@@ -110,12 +110,12 @@ spec = do
   describe "Processing Properties" $ do
     it "[up/down]sampleRows" $ property prop_sampleRows
     it "[up/down]sampleCols" $ property prop_sampleCols
-    --it "upsampleId" $ property $ conjoin [prop_upsampleId, prop_downsampleId]
+    it "upsampleId" $ property prop_upsampleId
     it "downsampleId" $ property prop_downsampleId
-    -- it "[up/down]sampleEven" $ property prop_sampleEven
-    -- it "[up/down]sampleOdd" $ property prop_sampleOdd
+    it "[up/down]sampleEven" $ property prop_sampleEven
+    it "[up/down]sampleOdd" $ property prop_sampleOdd
     -- it "translateWrap" $ property prop_translateWrap
-    -- it "cropSuperimpose" $ property prop_cropSuperimpose
+    it "cropSuperimpose" $ property prop_cropSuperimpose
     it "concatRotate" $ property prop_concatRotate
     it "rotate90" $ property prop_rotate90
     it "rotate180" $ property prop_rotate180
@@ -142,7 +142,7 @@ spec = do
     -- it "crop negative dimensions" $ do
     --   shouldThrow (return $! crop (1, 1) (-5, 15) dummyImage10x20) anyException
     --   shouldThrow (return $! crop (1, 1) (5, -15) dummyImage10x20) anyException
-    -- it "upsampleNegative" $ property prop_upsampleNegative
+    it "upsampleNegative" $ property prop_upsampleNegative
     -- it "downsample all" $ do
     --   shouldThrow (return $! downsample (const True) even dummyImage10x20) anyException
     --   shouldThrow (return $! downsample even (const True) dummyImage10x20) anyException

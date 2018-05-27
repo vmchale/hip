@@ -14,5 +14,5 @@ main = do
   hspec $ do
     describe "Processing" $ do
       ProcessingSpec.spec
-      describe "Binary" $ do
-        BinarySpec.spec
+    describe "Binary" $ do
+      BinarySpec.spec
