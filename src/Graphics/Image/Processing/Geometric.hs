@@ -74,7 +74,7 @@ downsample mPred nPred = transmute getNewDims getNewPx
           sz = VU.length rowsIx :. VU.length colsIx
       in (sz, (rowsIx, colsIx))
     {-# INLINE getNewDims #-}
-    getNewPx !(rowsIx, colsIx) getPx (i :. j) =
+    getNewPx (rowsIx, colsIx) getPx (i :. j) =
       getPx (VU.unsafeIndex rowsIx i :. VU.unsafeIndex colsIx j)
     {-# INLINE getNewPx #-}
 {-# INLINE [~1] downsample #-}
@@ -102,8 +102,8 @@ upsample defPx mAdd nAdd = transmute getNewDims getNewPx
   where
     getNewDims (m' :. n') = (sz, (sz, rowsIx, colsIx))
       where
-        rowsInfoArr = A.makeArrayR A.U Seq m' ((bimap (max 0) (max 0)) . mAdd)
-        colsInfoArr = A.makeArrayR A.U Seq n' ((bimap (max 0) (max 0)) . nAdd)
+        rowsInfoArr = A.makeArrayR A.U Seq m' (bimap (max 0) (max 0) . mAdd)
+        colsInfoArr = A.makeArrayR A.U Seq n' (bimap (max 0) (max 0) . nAdd)
         m = A.sum (A.map (uncurry (+)) rowsInfoArr) + m'
         n = A.sum (A.map (uncurry (+)) colsInfoArr) + n'
         sz = m :. n
@@ -216,7 +216,7 @@ canvasSize atBorder fSz =
   transmute
     (\oldSz ->
        let (newSz, offset) = fSz oldSz
-       in (newSz, (oldSz, offset))) $ \(sz, (dm :. dn)) getPx (i :. j) ->
+       in (newSz, (oldSz, offset))) $ \(sz, dm :. dn) getPx (i :. j) ->
     A.handleBorderIndex atBorder sz getPx (i - dm :. j - dn)
 {-# INLINE [~1] canvasSize #-}
 

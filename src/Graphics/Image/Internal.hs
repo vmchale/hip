@@ -27,6 +27,7 @@ module Graphics.Image.Internal
   , toArray
   , setComp
   , dims
+  , isEmpty
   , map
   , imap
   , zipWith
@@ -52,17 +53,17 @@ module Graphics.Image.Internal
 import           Control.DeepSeq
 import qualified Data.Massiv.Array        as A
 import           Data.Massiv.Array.Unsafe as A
-import           Data.Massiv.Core
+import           Data.Massiv.Core         hiding (isEmpty)
 import           Data.Semigroup
 import           Data.Typeable
 import           GHC.Exts                 (IsList (..))
 import           Graphics.ColorSpace
 import           Prelude                  as P hiding (map, traverse, zipWith,
-                                                zipWith3)
+                                                       zipWith3)
 
 -- | Main data type of the library
 data Image cs e = Image !(Array A.S Ix2 (Pixel cs e))
--- It is not a newtype, just so the fusion would work properly
+-- It is not a newtype, just so the fusion works properly
 
 instance ColorSpace cs e => Show (Image cs e) where
   show img =
@@ -134,7 +135,7 @@ instance ColorSpace cs e => IsList (Image cs e) where
   fromList = fromLists
   toList = toLists
 
--- Below is the simplistic, yet very powerful HIP fusion guts:
+-- Below is very simplistic, yet verextremely powerful HIP fusion guts:
 
 computeI :: ColorSpace cs e => Array A.D Ix2 (Pixel cs e) -> Image cs e
 computeI = Image . A.compute
@@ -145,7 +146,7 @@ delayI (Image arr) = A.delay arr
 {-# INLINE [1] delayI #-}
 
 {-# RULES
-"fuse delayI/computeI" forall arr . delayI (computeI arr) = arr
+"fuse delayI/computeI" [~1] forall arr . delayI (computeI arr) = arr
  #-}
 
 -- | Get image dimensions. Using this function will cause an image to be fully evaluated and will
@@ -157,7 +158,7 @@ dims (Image arr) = A.size arr
 
 -- | Check if image is empty, i.e. at least one of its sides is equal to 0. Uses `dims` underneath.
 isEmpty :: ColorSpace cs e => Image cs e -> Bool
-isEmpty = (0 ==) . A.totalElem . dims
+isEmpty (Image arr) = A.isEmpty arr
 {-# INLINE isEmpty #-}
 
 
@@ -419,13 +420,13 @@ minPixel = getMin . foldSemi1 Min
 -- | Find the largest channel value among all pixels in the image. Throws an error on empty (see
 -- `isEmpty`) images.
 maxVal :: (Ord e, ColorSpace cs e) => Image cs e -> e
-maxVal = A.maximum . A.map (foldl1 max) . delayI
+maxVal = A.maximum . A.map maximum . delayI
 {-# INLINE [~1] maxVal #-}
 
 -- | Find the smallest channel value among all pixels in the image. Throws an error on empty (see
 -- `isEmpty`) images.
 minVal :: (Ord e, ColorSpace cs e) => Image cs e -> e
-minVal = A.minimum . A.map (foldl1 min) . delayI
+minVal = A.minimum . A.map minimum . delayI
 {-# INLINE [~1] minVal #-}
 
 
@@ -502,7 +503,7 @@ liftArray2
   => (a -> b -> e) -> Array r1 ix a -> Array r2 ix b -> Array A.D ix e
 liftArray2 f arr1 arr2
   | sz1 == oneIndex = A.map (f (unsafeIndex arr1 zeroIndex)) arr2
-  | sz2 == oneIndex = A.map (`f` (unsafeIndex arr2 zeroIndex)) arr1
+  | sz2 == oneIndex = A.map (`f` unsafeIndex arr2 zeroIndex) arr1
   | sz1 == sz2 =
     A.makeArrayR A.D (A.getComp arr1) sz1 (\ ix -> f (unsafeIndex arr1 ix) (unsafeIndex arr2 ix))
   | otherwise =

@@ -31,7 +31,7 @@ correlate ::
   -> Image cs e -- ^ Source image.
   -> Image cs e
 correlate !border (Image kernel) (Image arr) =
-  Image (A.compute $ A.mapStencil (A.makeCorrelationStencilFromKernel border kernel) arr)
+  Image (A.compute (A.mapStencil border (A.makeCorrelationStencilFromKernel kernel) arr))
 {-# INLINE correlate #-}
 
 
@@ -53,7 +53,7 @@ convolve ::
   -> Image cs e -- ^ Source image.
   -> Image cs e
 convolve !border (Image kernel) (Image arr) =
-  Image (A.compute $ A.mapStencil (A.makeConvolutionStencilFromKernel border kernel) arr)
+  Image (A.compute $ A.mapStencil border (A.makeConvolutionStencilFromKernel kernel) arr)
 {-# INLINE convolve #-}
 
 

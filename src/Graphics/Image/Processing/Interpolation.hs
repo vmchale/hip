@@ -42,14 +42,14 @@ data Bilinear = Bilinear deriving Show
 
 instance Interpolation Nearest where
 
-  interpolate Nearest border !sz getPx !(i, j) =
+  interpolate Nearest border !sz getPx (i, j) =
     handleBorderIndex border sz getPx (round i :. round j)
   {-# INLINE interpolate #-}
 
 
 instance Interpolation Bilinear where
 
-  interpolate Bilinear border !sz getPx !(i, j) = fi0 + fmap (jPx*) (fi1-fi0) where
+  interpolate Bilinear border !sz getPx (i, j) = fi0 + fmap (jPx*) (fi1-fi0) where
     getPx' = handleBorderIndex border sz getPx
     {-# INLINE getPx' #-}
     !(i0, j0) = (floor i, floor j)

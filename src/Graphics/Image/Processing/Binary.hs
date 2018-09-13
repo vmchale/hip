@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns          #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -228,7 +227,7 @@ and = isOn . fold (.&.) on
 element is always at it's center, eg. @(1,1)@ for the one below.
 
 @
-figure :: Image VU X Bit
+figure :: Image X Bit
 figure = fromLists [[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
                     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
                     [0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0],
@@ -246,7 +245,7 @@ figure = fromLists [[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
                     [0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0],
                     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
                     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]]
-struct :: Image VU X Bit
+struct :: Image X Bit
 struct = fromLists [[0,1,0],[1,1,0],[0,1,0]]
 @
 -}
