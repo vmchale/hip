@@ -51,7 +51,7 @@ library
                   , Graphics.Image.Processing
                   , Graphics.Image.Processing.Binary
                   , Graphics.Image.Processing.Complex
-  --                , Graphics.Image.Processing.Filter
+                  , Graphics.Image.Processing.Filter
   other-modules:   Graphics.Image.Internal
                   , Graphics.Image.Processing.Convolution
                   , Graphics.Image.Processing.Complex.Fourier

@@ -39,9 +39,9 @@ infix 6 !+!
 --
 -- >>> frog <- readImageRGB "images/frog.jpg"
 -- >>> frog !+! 0
--- <Image VectorUnboxed RGB (Complex Double): 200x320>
+-- <Image RGB Complex Double: 200x320>
 -- >>> frog !+! frog
--- <Image VectorUnboxed RGB (Complex Double): 200x320>
+-- <Image RGB Complex Double: 200x320>
 --
 (!+!) :: (ColorSpace cs e, ColorSpace cs (Complex e)) =>
          Image cs e -> Image cs e -> Image cs (Complex e)

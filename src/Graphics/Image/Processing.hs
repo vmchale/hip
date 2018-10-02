@@ -17,8 +17,10 @@ module Graphics.Image.Processing
   , module Graphics.Image.Processing.Convolution
   -- * Binary
   , module Graphics.Image.Processing.Binary
+  -- * Complex
+  , module Graphics.Image.Processing.Complex
   -- * Filters
-  -- module Graphics.Image.Processing.Filter,
+  , module Graphics.Image.Processing.Filter
   -- * Tools
   , pixelGrid
   ) where
@@ -26,11 +28,12 @@ module Graphics.Image.Processing
 import Graphics.ColorSpace
 import Graphics.Image.Internal
 import Graphics.Image.Processing.Binary
+import Graphics.Image.Processing.Complex
 import Graphics.Image.Processing.Convolution
 import Graphics.Image.Processing.Geometric
 import Graphics.Image.Processing.Interpolation
 import Prelude hiding (traverse)
---import Graphics.Image.Processing.Filter
+import Graphics.Image.Processing.Filter
 
 
 

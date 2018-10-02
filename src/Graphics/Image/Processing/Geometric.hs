@@ -337,7 +337,7 @@ rotate method border theta' (Image arr) =
     let !(iD, jD) = (fromIntegral i - iDelta + 0.5, fromIntegral j - jDelta + 0.5)
         !i' = iD * cosTheta + jD * sinTheta - 0.5
         !j' = jD * cosTheta - iD * sinTheta - 0.5
-    in interpolate method border sz (A.index' arr) (i', j')
+    in interpolate method (A.handleBorderIndex border sz (A.index' arr)) (i', j')
   where
     !theta = angle0to2pi (-theta') -- invert angle direction and put it into [0, 2*pi) range
     !sz@(m :. n) = A.size arr
@@ -380,9 +380,7 @@ resize method border sz'@(m' :. n') (Image arr) = Image (A.compute (A.traverse s
     getNewPx getPx (i :. j) =
       interpolate
         method
-        border
-        sz
-        getPx
+        (A.handleBorderIndex border sz getPx)
         ((fromIntegral i + 0.5) / fM - 0.5, (fromIntegral j + 0.5) / fN - 0.5)
     {-# INLINE getNewPx #-}
 {-# INLINE resize #-}

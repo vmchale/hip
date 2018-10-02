@@ -53,26 +53,27 @@ applyFilter border (Filter stencil) (Image arr) =
 -- IDEA: rerwrite rules depending on types
 
 type CommonColorSpace cs
-   = ( ColorSpace cs Word8
-     , ColorSpace cs Int16
+   = ( ColorSpace cs Int16
+     , ColorSpace cs Int32
      , ColorSpace cs Word32
      , ColorSpace cs Word64
      , ColorSpace cs Float
      , ColorSpace cs Double)
 
 laplacianFilter :: (CommonColorSpace cs, ColorSpace cs e) => Filter cs e
-laplacianFilter =
-  Filter (A.makeStencil (3 :. 3) (1 :. 1) $ \ f' ->
-             let f ix = toDouble <$> f' ix
-             in fromDouble <$> (
-               8  *   f ( 0 :.  0) +
-             (-1) * ( f (-1 :. -1) + f (-1 :. 0) + f (-1 :. 1)
-                    + f ( 0 :. -1) +               f ( 0 :. 1)
-                    + f ( 1 :. -1) + f ( 1 :. 0) + f ( 1 :. 1))))
+laplacianFilter = laplacianFilterGeneric id id
+  -- Filter (A.makeStencil (3 :. 3) (1 :. 1) $ \ f' ->
+  --            let f ix = toDouble <$> f' ix
+  --            in fromDouble <$> (
+  --              8  *   f ( 0 :.  0) +
+  --            (-1) * ( f (-1 :. -1) + f (-1 :. 0) + f (-1 :. 1)
+  --                   + f ( 0 :. -1) +               f ( 0 :. 1)
+  --                   + f ( 1 :. -1) + f ( 1 :. 0) + f ( 1 :. 1))))
 {-# INLINE [2] laplacianFilter #-}
 
 {-# RULES
 "laplacianFilter/Word8" [~2] laplacianFilter = laplacianFilter8
+"laplacianFilter/Word16" [~2] laplacianFilter = laplacianFilter16
  #-}
 
 -- TODO: benchmark
@@ -88,6 +89,42 @@ laplacianFilter8 =
              f (1 :. 0) +
              f (1 :. 1))))
 {-# INLINE [2] laplacianFilter8 #-}
+
+-- TODO: benchmark
+laplacianFilter16 :: (ColorSpace cs Int32, ColorSpace cs Word16) => Filter cs Word16
+laplacianFilter16 =
+  laplacianFilterGeneric (fromIntegral :: Word16 -> Int32) (fromIntegral :: Int32 -> Word16)
+{-# INLINE [2] laplacianFilter16 #-}
+
+
+laplacianFilterGeneric ::
+     (ColorSpace cs a, ColorSpace cs b) => (a -> b) -> (b -> a) -> Filter cs a
+laplacianFilterGeneric to from =
+  Filter
+    (A.makeStencil (3 :. 3) (1 :. 1) $ \f' ->
+       let f ix = fmap to <$> f' ix
+        in fmap from <$>
+           (8 * f (0 :. 0) +
+            (-1) *
+            (f (-1 :. -1) + f (-1 :. 0) + f (-1 :. 1) + f (0 :. -1) + f (0 :. 1) + f (1 :. -1) +
+             f (1 :. 0) +
+             f (1 :. 1))))
+{-# INLINE [2] laplacianFilterGeneric #-}
+
+
+laplacianFilterElevated ::
+     (ColorSpace cs (LevelUp a), ColorSpace cs a) => Filter cs a
+laplacianFilterElevated =
+  Filter
+    (A.makeStencil (3 :. 3) (1 :. 1) $ \f' ->
+       let f ix = fmap eUp <$> f' ix
+        in fmap eDown <$>
+           (8 * f (0 :. 0) +
+            (-1) *
+            (f (-1 :. -1) + f (-1 :. 0) + f (-1 :. 1) + f (0 :. -1) + f (0 :. 1) + f (1 :. -1) +
+             f (1 :. 0) +
+             f (1 :. 1))))
+{-# INLINE [2] laplacianFilterElevated #-}
 
 
 -- -- | Used to specify direction for some filters.
