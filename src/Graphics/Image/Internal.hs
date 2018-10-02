@@ -20,7 +20,7 @@ module Graphics.Image.Internal
   , computeI
   , delayI
   , makeImage
-  , makeImageC
+  , makeImageComp
   , fromLists
   , toLists
   , fromArray
@@ -52,7 +52,6 @@ module Graphics.Image.Internal
 
 import           Control.DeepSeq
 import qualified Data.Massiv.Array        as A
-import           Data.Massiv.Array.Unsafe as A
 import           Data.Massiv.Core         hiding (isEmpty)
 import           Data.Semigroup
 import           Data.Typeable
@@ -168,6 +167,7 @@ setComp :: ColorSpace cs e => Comp -> Image cs e -> Image cs e
 setComp comp = computeI . A.setComp comp . delayI
 {-# INLINE [~1] setComp #-}
 
+
 -- | Create a scalar image with only one element. Could be handy together with `liftArray2`
 -- function.
 scalar :: ColorSpace cs e => Pixel cs e -> Image cs e
@@ -189,15 +189,15 @@ makeImage sz = computeI . A.makeArray Par sz
 {-# INLINE [~1] makeImage #-}
 
 -- | Same as `makeImage`, except computation startegy can be supplied as an argument.
-makeImageC :: ColorSpace cs e =>
-              Comp
-           -> Ix2 -- ^ (@m@ rows `:.` @n@ columns) - dimensions of a new image.
-           -> (Ix2 -> Pixel cs e)
-           -- ^ A function that takes (@i@-th row `:.` and @j@-th column) as an
-           -- argument and returns a pixel for that location.
-          -> Image cs e
-makeImageC comp sz = computeI . A.makeArray comp sz
-{-# INLINE [~1] makeImageC #-}
+makeImageComp :: ColorSpace cs e =>
+                 Comp
+              -> Ix2 -- ^ (@m@ rows `:.` @n@ columns) - dimensions of a new image.
+              -> (Ix2 -> Pixel cs e)
+              -- ^ A function that takes (@i@-th row `:.` and @j@-th column) as an
+              -- argument and returns a pixel for that location.
+             -> Image cs e
+makeImageComp comp sz = computeI . A.makeArray comp sz
+{-# INLINE [~1] makeImageComp #-}
 
 -- | Convert a 2-dimensional source array of pixels into an image.
 fromArray :: (Source r Ix2 (Pixel cs e), ColorSpace cs e) => Array r Ix2 (Pixel cs e) -> Image cs e
@@ -437,7 +437,7 @@ minVal = A.minimum . A.map minimum . delayI
 liftImage2 :: (ColorSpace cs1 e1, ColorSpace cs2 e2, ColorSpace cs e) =>
            (Pixel cs1 e1 -> Pixel cs2 e2 -> Pixel cs e)
         -> Image cs1 e1 -> Image cs2 e2 -> Image cs e
-liftImage2 f img1 img2 = computeI $ liftArray2 f (delayI img1) (delayI img2)
+liftImage2 f img1 img2 = computeI $ A.liftArray2 f (delayI img1) (delayI img2)
 {-# INLINE [~1] liftImage2 #-}
 
 -- Array functions.
@@ -496,22 +496,3 @@ traverseArray2 fSz f arr1 arr2 =
     (fSz (A.size arr1) (A.size arr2))
     (f (A.evaluateAt arr1) (A.evaluateAt arr2))
 {-# INLINE traverseArray2 #-}
-
--- | TODO: expose liftArray2 as internal in massiv.
-liftArray2
-  :: (Source r1 ix a, Source r2 ix b)
-  => (a -> b -> e) -> Array r1 ix a -> Array r2 ix b -> Array A.D ix e
-liftArray2 f arr1 arr2
-  | sz1 == oneIndex = A.map (f (unsafeIndex arr1 zeroIndex)) arr2
-  | sz2 == oneIndex = A.map (`f` unsafeIndex arr2 zeroIndex) arr1
-  | sz1 == sz2 =
-    A.makeArrayR A.D (A.getComp arr1) sz1 (\ ix -> f (unsafeIndex arr1 ix) (unsafeIndex arr2 ix))
-  | otherwise =
-    error $
-    "Array dimensions must be the same, instead got: " ++
-    show sz1 ++ " and " ++ show sz2
-  where
-    oneIndex = pureIndex 1
-    sz1 = A.size arr1
-    sz2 = A.size arr2
-{-# INLINE liftArray2 #-}

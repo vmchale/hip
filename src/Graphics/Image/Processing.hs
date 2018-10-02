@@ -17,7 +17,7 @@ module Graphics.Image.Processing
   , module Graphics.Image.Processing.Convolution
   -- * Binary
   , module Graphics.Image.Processing.Binary
-  -- -- * Filters
+  -- * Filters
   -- module Graphics.Image.Processing.Filter,
   -- * Tools
   , pixelGrid

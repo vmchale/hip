@@ -1,8 +1,8 @@
-{-# LANGUAGE BangPatterns #-}
 {-# OPTIONS_GHC -fno-warn-duplicate-exports #-}
+{-# LANGUAGE BangPatterns          #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE PatternSynonyms     #-}
+{-# LANGUAGE PatternSynonyms       #-}
 -- |
 -- Module      : Graphics.Image
 -- Copyright   : (c) Alexey Kuleshevich 2016-2018
@@ -52,8 +52,8 @@ module Graphics.Image
   , makeImage
   -- * Computation
   , Comp(..)
-  , pattern Par
-  , makeImageC
+  -- , pattern Par
+  , makeImageComp
   , setComp
   -- * Conversion
   , fromArray
@@ -63,14 +63,9 @@ module Graphics.Image
   -- * IO
   -- module Graphics.Image.IO,
   -- ** Reading
-  -- | Read supported files into an 'Image' with pixels in 'Double'
-  -- precision. In order to read an image in a different representation, color
-  -- space or precision, use 'readImage' or 'readImageExact' from
-  -- <Graphics-Image-IO.html Graphics.Image.IO> instead. While reading an image,
-  -- it's underlying representation can be specified by passing one of `VU`,
-  -- `VS`, `RSU`, `RPU`, `RSS` or `RSU` as the first argument to @readImage*@
-  -- functions. Here is a quick demonstration of how two images can be read as
-  -- different representations and later easily combined as their average.
+  -- | Read supported files into an 'Image' possibly with automatic color space conversion. Here is
+  -- a quick demonstration of how two images can be read as different representations and later
+  -- easily combined as their average.
   --
   -- >>> cluster <- readImageRGB "images/cluster.jpg"
   -- >>> displayImage cluster
@@ -128,13 +123,10 @@ module Graphics.Image
   , maximum
   , minimum
   , normalize
-  --, eqTol,
-  -- * Manifest Image
-  -- * Representations
+  , eqTol
   ) where
 
 import qualified Data.Massiv.Array         as A
-import           Data.Semigroup
 import           Graphics.ColorSpace
 import           Graphics.Image.Internal   as I
 import           Graphics.Image.IO         as I
@@ -142,7 +134,6 @@ import           Graphics.Image.Processing as IP
 import           Prelude                   as P hiding (map, maximum, minimum,
                                                  product, sum, traverse,
                                                  zipWith, zipWith3)
-import Data.Foldable (foldl1)
 -- import Graphics.Image.Types as IP
 
 -- import Graphics.Image.Processing as IP

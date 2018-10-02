@@ -8,7 +8,7 @@
 -- Portability : non-portable
 --
 module Graphics.Image.IO
-  ( -- * Reading
+  (  -- * Reading
     readImage
   , readImageAuto
   , readImageY
@@ -19,18 +19,54 @@ module Graphics.Image.IO
   , writeImage
   , writeImageAuto
   -- TODO: reexport bunch of massiv-io stuff
-  -- -- * Displaying
-  -- ExternalViewer(..),
+  -- * Displaying
+  , A.ExternalViewer(..)
   , displayImage
-  -- displayImageUsing,
-  -- -- ** Common viewers
-  -- displayImageFile,
-  -- defaultViewer,
-  -- eogViewer,
-  -- gpicviewViewer,
-  -- fehViewer,
-  -- gimpViewer,
-  -- -- * Supported Image Formats
+  , displayImageUsing
+  -- ** Common viewers
+  , A.displayImageFile
+  , A.defaultViewer
+  , A.eogViewer
+  , A.gpicviewViewer
+  , A.fehViewer
+  , A.gimpViewer
+  -- * Supported Image Formats
+      -- ** BMP
+  , A.BMP(..)
+    -- ** GIF
+  , A.GIF(..)
+  , A.WriteOptionsGIF
+  , A.woGetPaletteOptionsGIF
+  , A.woSetPaletteOptionsGIF
+  , A.PaletteOptions(..)
+  , A.PaletteCreationMethod(..)
+    -- *** Animated
+  , A.WriteOptionsSequenceGIF
+  , A.woGetGifLoopingGIFs
+  , A.woGetPaletteOptionsGIFs
+  , A.woSetGifLoopingGIFs
+  , A.woSetPaletteOptionsGIFs
+  , A.GifDelay
+  , A.GifLooping(..)
+  -- ** HDR
+  , A.HDR(..)
+  -- ** JPG
+  , A.JPG(..)
+  , A.WriteOptionsJPG
+  , A.woGetQualityJPG
+  , A.woSetQualityJPG
+  -- ** PNG
+  , A.PNG(..)
+  -- ** TGA
+  , A.TGA(..)
+  -- ** TIF
+  , A.TIF(..)
+  -- ** PBM
+  , A.PBM(..)
+  -- ** PGM
+  , A.PGM(..)
+  -- ** PPM
+  , A.PPM(..)
   -- module Graphics.Image.IO.Formats
   -- $supported
   -- * Hands on examples
@@ -43,11 +79,17 @@ import qualified Data.Massiv.Array.IO    as A
 import           Graphics.ColorSpace
 import           Graphics.Image.Internal
 
--- | Display an image by making a call to an external viewer that is set as a default image viewer
--- by the OS.
+-- | Display an image by writing it as a .tiff file to a temporary directory and making a call to an
+-- external viewer that is set as a default image viewer by the OS.
 displayImage :: (MonadIO m, ToRGBA cs e) => Image cs e -> m ()
 displayImage (Image arr) = liftIO $ A.displayImage arr
 {-# NOINLINE displayImage #-}
+
+-- | Display an image by making a call to an external viewer that is set as a default image viewer
+-- by the OS.
+displayImageUsing :: (MonadIO m, ToRGBA cs e) => A.ExternalViewer -> Bool -> Image cs e -> m ()
+displayImageUsing ev block (Image arr) = liftIO $ A.displayImageUsing ev block arr
+{-# NOINLINE displayImageUsing #-}
 
 
 -- | Try to guess an image format from file's extension, then attempt to decode it as such. Color

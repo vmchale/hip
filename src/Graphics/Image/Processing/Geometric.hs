@@ -333,7 +333,7 @@ rotate :: (ColorSpace cs e, Interpolation method) =>
        -> Image cs e -- ^ Source image
        -> Image cs e -- ^ Rotated image
 rotate method border theta' (Image arr) =
-  makeImageC (A.getComp arr) (ceiling mD' :. ceiling nD') $ \(i :. j) ->
+  makeImageComp (A.getComp arr) (ceiling mD' :. ceiling nD') $ \(i :. j) ->
     let !(iD, jD) = (fromIntegral i - iDelta + 0.5, fromIntegral j - jDelta + 0.5)
         !i' = iD * cosTheta + jD * sinTheta - 0.5
         !j' = jD * cosTheta - iD * sinTheta - 0.5

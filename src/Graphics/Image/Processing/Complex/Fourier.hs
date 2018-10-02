@@ -1,3 +1,4 @@
+{-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE BangPatterns          #-}
 {-# LANGUAGE ConstraintKinds       #-}
 {-# LANGUAGE FlexibleContexts      #-}
@@ -27,10 +28,10 @@ data Mode = Forward
           | Inverse
 
 -- | Fast Fourier Transform
-fft :: (ColorSpace cs (Complex e), ColorSpace cs e,
-        Fractional (Pixel cs (Complex e)), Floating (Pixel cs e), RealFloat e) =>
-       Image cs (Complex e)
-    -> Image cs (Complex e)
+fft ::
+     (ColorSpace cs (Complex e), ColorSpace cs e, RealFloat e)
+  => Image cs (Complex e)
+  -> Image cs (Complex e)
 fft = fft2d Forward
 {-# INLINEABLE fft #-}
 
@@ -39,8 +40,6 @@ fft = fft2d Forward
 ifft ::
      ( ColorSpace cs (Complex e)
      , ColorSpace cs e
-     , Fractional (Pixel cs (Complex e))
-     , Floating (Pixel cs e)
      , RealFloat e
      )
   => Image cs (Complex e)
@@ -65,8 +64,6 @@ isPowerOfTwo n = n /= 0 && (n .&. (n-1)) == 0
 fft2d ::
      ( ColorSpace cs (Complex e)
      , ColorSpace cs e
-     , Fractional (Pixel cs (Complex e))
-     , Floating (Pixel cs e)
      , RealFloat e
      )
   => Mode
@@ -91,7 +88,7 @@ fft2d !mode img@(Image arr) =
 
 
 fftArray ::
-     (ColorSpace cs (Complex e), ColorSpace cs e, Floating (Pixel cs e), RealFloat e)
+     (ColorSpace cs (Complex e), ColorSpace cs e, RealFloat e)
   => Pixel cs e
   -> A.Array A.S Ix2 (Pixel cs (Complex e))
   -> A.Array A.S Ix2 (Pixel cs (Complex e))
@@ -121,11 +118,12 @@ fftArray !sign arr = A.compute (A.transpose (go n 0 1))
 
 
 -- Compute a twiddle factor.
-twiddle :: (ColorSpace cs e, Floating (Pixel cs e)) =>
-           Pixel cs e
-        -> Int                  -- index
-        -> Int                  -- length
-        -> Pixel cs (Complex e)
+twiddle ::
+     (ColorSpace cs e, Floating e)
+  => Pixel cs e
+  -> Int -- index
+  -> Int -- length
+  -> Pixel cs (Complex e)
 twiddle !sign !k !n = cos alpha +: sign * sin alpha
   where
     !alpha = 2 * pi * fromIntegral k / fromIntegral n
