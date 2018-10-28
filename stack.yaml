@@ -4,3 +4,9 @@ packages:
 - '.'
 - '../massiv/massiv-io'
 resolver: lts-12.2
+extra-deps:
+- github: lehins/massiv
+  commit: f6e7ecfcc0f9082907867dc0ff8fb1b8d61c8d50
+  subdirs:
+    - massiv
+

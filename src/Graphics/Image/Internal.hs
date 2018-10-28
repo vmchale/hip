@@ -420,13 +420,13 @@ minPixel = getMin . foldSemi1 Min
 -- | Find the largest channel value among all pixels in the image. Throws an error on empty (see
 -- `isEmpty`) images.
 maxVal :: (Ord e, ColorSpace cs e) => Image cs e -> e
-maxVal = A.maximum . A.map maximum . delayI
+maxVal (Image arr) = A.maximum $ A.map maximum arr
 {-# INLINE [~1] maxVal #-}
 
 -- | Find the smallest channel value among all pixels in the image. Throws an error on empty (see
 -- `isEmpty`) images.
 minVal :: (Ord e, ColorSpace cs e) => Image cs e -> e
-minVal = A.minimum . A.map minimum . delayI
+minVal (Image arr) = A.minimum $ A.map minimum arr
 {-# INLINE [~1] minVal #-}
 
 

@@ -276,20 +276,13 @@ minimum = A.minimum . delayI
 
 
 -- | Scales all of the pixels to be in the range @[0, 1]@.
-normalize :: (ColorSpace cs e, Ord e, Fractional e) =>
+normalize :: (ColorSpace cs e, Ord e) =>
              Image cs e -> Image cs e
-normalize !img =
-  if l == s
-    then (if s < 0
-            then (* 0)
-            else if s > 1
-                   then (* 1)
-                   else id)
-           img
-    else I.map (fmap (\ e -> (e - s) / (l - s))) img
+normalize img =
+  I.map (fmap (\e -> (e - iMin) * ((eMaxValue - eMinValue) // (iMax - iMin)) + eMinValue)) img
   where
-    !l = maxVal img
-    !s = minVal img
+    !iMax = maxVal img
+    !iMin = minVal img
 {-# INLINE normalize #-}
 
 -- | Check weather two images are equal within a tolerance. Useful for comparing

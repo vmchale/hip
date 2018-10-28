@@ -16,7 +16,6 @@ module Graphics.Image.Processing.Interpolation (
 import Control.Applicative
 import Graphics.ColorSpace
 import Graphics.Image.Internal
-import Data.Massiv.Array
 
 -- | Implementation for an interpolation method.
 class Interpolation method where
