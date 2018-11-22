@@ -16,32 +16,38 @@
 --
 module Graphics.Image.Processing.Filter
   ( -- * Filter
+    -- $filter
     Filter
+  , Filter'
+  -- ** Application
+  , applyFilter
+  -- ** Creation
+  , makeFilter
+  -- ** Conversion
+  , fromStencil
+  , toStencil
+  -- ** Profunctor
   , lmapFilter
   , rmapFilter
   , dimapFilter
-  , applyFilter
-  , laplacianFilter
-  , laplacianFilterElevated
-
-  , eSobelX
-  , genericSobelX
-
+  -- * Available filters
+  -- ** Gaussian
+  , gaussian5x5
+  , gaussian5x1
+  , gaussian1x5
+  , applyGaussian5x5
+  -- ** Laplacian
   , laplacian
-  , laplacian'
-  -- * Sobel
+  -- ** Laplacian of Gaussian
+  --, laplacianOfGaussian
+  -- ** Sobel
   , sobelHorizontal
-  , sobelHorizontalN
   , sobelVertical
-  , sobelVerticalN
   , sobelOperator
-  , sobelOperatorN
-  -- * Prewitt
+  -- ** Prewitt
   , prewittHorizontal
   , prewittVertical
   , prewittOperator
-  , prewittOperator'
-  -- , Direction(..)
   --   -- * Gaussian
   -- , gaussianLowPass
   -- , gaussianBlur
@@ -64,8 +70,9 @@ import           Prelude                 as P
 -- | Filter that can be applied to an image using `applyFilter`.
 newtype Filter cs a b = Filter
   { filterStencil :: A.Stencil Ix2 (Pixel cs a) (Pixel cs b)
-  } deriving (Floating, Fractional, Num, NFData)
+  } deriving (NFData, Num, Fractional, Floating)
 
+-- | Helper type synonym for `Filter` where both input and output precision are the same.
 type Filter' cs e = Filter cs e e
 
 instance Functor (Pixel cs) => Functor (Filter cs a) where
@@ -78,6 +85,19 @@ instance (ColorSpace cs a, Applicative (Pixel cs)) => Applicative (Filter cs a) 
   liftA2 f (Filter x) (Filter y) = Filter (liftA2 (liftA2 f) x y)
   {-# INLINE liftA2 #-}
 
+-- | Applying a filter is just like mapping a `Stencil` with `A.mapStencil`, which is similar to
+-- mapping a function over an array, with an exception of border resolution and underlying
+-- complexity.
+--
+-- >λ> batRGB <- readImageRGB "images/megabat.jpg"
+-- >λ> writeImage "images/megabat_sobel_rgb.jpg" $ normalize $ applyFilter Edge sobelOperator batRGB
+-- >λ> let batY = I.map toPixelY batRGB
+-- >λ> writeImage "images/megabat_sobel.jpg" $ normalize $ applyFilter Edge sobelOperator batY
+--
+-- <<images/megabat.jpg>> <<images/megabat_sobel_rgb.jpg>> <<images/megabat_sobel.jpg>>
+--
+-- With filter application normalization is often desired, see `laplacian` for an example without
+-- normalization.
 applyFilter ::
      (ColorSpace cs a, ColorSpace cs b)
   => Border (Pixel cs a)
@@ -88,233 +108,253 @@ applyFilter border f (Image arr) =
   Image (A.compute (A.mapStencil border (filterStencil f) arr))
 {-# INLINE applyFilter #-}
 
-lmapFilter :: (Pixel cs a -> Pixel cs b) -> Filter cs b e -> Filter cs a e
-lmapFilter f (Filter s) = Filter (A.lmapStencil f s)
+
+-- | Create a custom filter
+makeFilter ::
+     ColorSpace cs a
+  => Ix2 -- ^ Filter size
+  -> Ix2 -- ^ Filter center
+  -> ((Ix2 -> A.Value (Pixel cs a)) -> A.Value (Pixel cs b)) -- ^ Filter stencil
+  -> Filter cs a b
+makeFilter sz ix = Filter . A.makeStencil sz ix
+{-# INLINE makeFilter #-}
+
+-- | Convert from [massiv](/package/massiv) 2D `A.Stencil`.
+fromStencil :: A.Stencil Ix2 (Pixel cs a) (Pixel cs b) -> Filter cs a b
+fromStencil = Filter
+{-# INLINE fromStencil #-}
+
+-- | Convert to a [massiv](/package/massiv) 2D `A.Stencil`.
+toStencil :: Filter cs a b -> A.Stencil Ix2 (Pixel cs a) (Pixel cs b)
+toStencil = filterStencil
+{-# INLINE toStencil #-}
+
+-- | `Filter` is contravariant in the second type argument, which is the type of elements in
+-- pixels of the image, that the filter will be applied to. In other words function @f@ supplied
+-- to `lmapFilter` will be applied to each element of the image before applying the stencil to it.
+--
+-- /Note/ - This function must be used with care, since filters will usually use each pixel from
+-- the source image many times, the supplied function will also get called that many time for each
+-- pixel. For that reason, most of the time, it will make more sense to apply the function
+-- directly to the source image prior to applying the filter to it.
+lmapFilter :: Functor (Pixel cs) => (a' -> a) -> Filter cs a b -> Filter cs a' b
+lmapFilter f (Filter s) = Filter (A.lmapStencil (fmap f) s)
 {-# INLINE lmapFilter #-}
 
-rmapFilter :: (Pixel cs a -> Pixel cs b) -> Filter cs e a -> Filter cs e b
-rmapFilter g (Filter s) = Filter (A.rmapStencil g s)
+-- | This is essentially a synonym to `fmap`, and is provided here for completenss.
+rmapFilter :: Functor (Pixel cs) => (b -> b') -> Filter cs a b -> Filter cs a b'
+rmapFilter g (Filter s) = Filter (A.rmapStencil (fmap g) s)
 {-# INLINE rmapFilter #-}
 
-dimapFilter ::
-     (Pixel cs a -> Pixel cs a')
-  -> (Pixel cs b -> Pixel cs b')
-  -> Filter cs a' b
-  -> Filter cs a  b'
-dimapFilter f g (Filter s) = Filter (A.dimapStencil f g s)
+-- | `Filter` is a Profunctor, but instead of introducing a dependency on
+-- [profunctors](/package/profunctors), standalone functions are provided
+-- here. Same performance consideration applies as in `lmapFilter`.
+dimapFilter :: Functor (Pixel cs) => (a' -> a) -> (b -> b') -> Filter cs a b -> Filter cs a' b'
+dimapFilter f g (Filter s) = Filter (A.dimapStencil (fmap f) (fmap g) s)
 {-# INLINE dimapFilter #-}
 
 
-laplacian :: (ColorSpace cs (LevelUp e), ColorSpace cs e) => Filter cs e e
-laplacian = rmapFilter (fmap eDown) laplacian'
+-------------
+-- Filters --
+-------------
+
+
+-- | Gaussian 5x5 filter. Gaussian is separable, so it is faster to apply `gaussian5x1` after
+-- `gaussian1x5`.
+--
+-- >λ> bat <- readImageY "images/megabat.jpg"
+-- >λ> writeImage "images/megabat_laplacian_nonorm.jpg" $ applyFilter Edge laplacian bat -- no normalization
+-- >λ> writeImage "images/megabat_laplacian.jpg" $ normalize $ applyFilter Edge laplacian bat
+--
+-- <<images/megabat_y.jpg>> <<images/megabat_laplacian_nonorm.jpg>> <<images/megabat_laplacian.jpg>>
+--
+-- ==== __Convolution Kernel__
+--
+-- \[
+-- \mathbf{L} = \begin{bmatrix}
+-- +1 & +1 & +1 \\
+-- +1 & -8 & +1 \\
+-- +1 & +1 & +1
+-- \end{bmatrix}
+-- \]
+--
+gaussian5x5 :: (Fractional e, ColorSpace cs e) => Filter cs e e
+gaussian5x5 = Filter $ fmap (/ 273) <$> A.makeStencil (5 :. 5) (2 :. 2) stencil
+  where
+    stencil f =
+          f (-2 :. -2) +  4 * f (-2 :. -1) +  7 * f (-2 :.  0) +  4 * f (-2 :.  1) +     f (-2 :.  2) +
+      4 * f (-1 :. -2) + 16 * f (-1 :. -1) + 26 * f (-1 :.  0) + 16 * f (-1 :.  1) + 4 * f (-1 :.  2) +
+      7 * f ( 0 :. -2) + 26 * f ( 0 :. -1) + 41 * f ( 0 :.  0) + 26 * f ( 0 :.  1) + 7 * f ( 0 :.  2) +
+      4 * f ( 1 :. -2) + 16 * f ( 1 :. -1) + 26 * f ( 1 :.  0) + 16 * f ( 1 :.  1) + 4 * f ( 1 :.  2) +
+          f ( 2 :. -2) +  4 * f ( 2 :. -1) +  7 * f ( 2 :.  0) +  4 * f ( 2 :.  1) +     f ( 2 :.  2)
+    {-# INLINE stencil #-}
+{-# INLINE gaussian5x5 #-}
+
+
+gaussian1x5 :: (Fractional e, ColorSpace cs e) => Filter cs e e
+gaussian1x5 = Filter $ fmap (/ 17) <$> A.makeStencil (1 :. 5) (0 :. 2) stencil
+  where
+    stencil f = f (0 :. -2) +  4 * f (0 :. -1) + 7 * f (0 :.  0) + 4 * f (0 :.  1) + f (0 :.  2)
+    {-# INLINE stencil #-}
+{-# INLINE gaussian1x5 #-}
+
+
+gaussian5x1 :: (Fractional e, ColorSpace cs e) => Filter cs e e
+gaussian5x1 = Filter $ fmap (/ 17) <$> A.makeStencil (5 :. 1) (2 :. 0) stencil
+  where
+    stencil f = f (-2 :. 0) +  4 * f (-1 :. 0) + 7 * f (0 :.  0) + 4 * f (1 :.  0) + f (2 :.  0)
+    {-# INLINE stencil #-}
+{-# INLINE gaussian5x1 #-}
+
+
+applyGaussian5x5 :: (Fractional b, ColorSpace cs b) => Border (Pixel cs b) -> Image cs b -> Image cs b
+applyGaussian5x5 b = applyFilter b gaussian5x1 . applyFilter b gaussian1x5
+{-# INLINE applyGaussian5x5 #-}
+
+-- | Laplacian filter
+--
+-- >λ> bat <- readImageY "images/megabat.jpg"
+-- >λ> writeImage "images/megabat_laplacian_nonorm.jpg" $ applyFilter Edge laplacian bat -- no normalization
+-- >λ> writeImage "images/megabat_laplacian.jpg" $ normalize $ applyFilter Edge laplacian bat
+--
+-- <<images/megabat_y.jpg>> <<images/megabat_laplacian_nonorm.jpg>> <<images/megabat_laplacian.jpg>>
+--
+-- ==== __Convolution Kernel__
+--
+-- \[
+-- \mathbf{L} = \begin{bmatrix}
+-- +1 & +1 & +1 \\
+-- +1 & -8 & +1 \\
+-- +1 & +1 & +1
+-- \end{bmatrix}
+-- \]
+--
+laplacian :: ColorSpace cs e => Filter cs e e
+laplacian = Filter $ A.makeStencil (3 :. 3) (1 :. 1) stencil
+  where stencil f = f (-1 :. -1) +     f (-1 :.  0) + f (-1 :.  1) +
+                    f ( 0 :. -1) - 8 * f ( 0 :.  0) + f ( 0 :.  1) +
+                    f ( 1 :. -1) +     f ( 1 :.  0) + f ( 1 :.  1)
+        {-# INLINE stencil #-}
 {-# INLINE laplacian #-}
 
-laplacian' :: (ColorSpace cs (LevelUp e), ColorSpace cs e) => Filter cs e (LevelUp e)
-laplacian' =
-  Filter $ A.lmapStencil (fmap eUp) $ A.makeStencil (3 :. 3) (1 :. 1) stencil
-  where stencil f = - f (-1 :. -1) -     f (-1 :.  0) - f (-1 :.  1) -
-                      f ( 0 :. -1) + 8 * f ( 0 :.  0) - f ( 0 :.  1) -
-                      f ( 1 :. -1) -     f ( 1 :.  0) - f ( 1 :.  1)
-        {-# INLINE stencil #-}
-{-# INLINE laplacian' #-}
-
-
-
-sobelHorizontal ::
-     (ColorSpace cs (LevelUp e), ColorSpace cs e) => Filter cs e (LevelUp e)
+-- | Sobel gradient along @x@ axis.
+--
+-- ==== __Convolution Kernel__
+--
+-- \[
+-- \mathbf{G}_x = \begin{bmatrix}
+-- +1 & 0 & -1 \\
+-- +2 & 0 & -2 \\
+-- +1 & 0 & -1
+-- \end{bmatrix}
+-- \]
+sobelHorizontal :: ColorSpace cs e => Filter cs e e
 sobelHorizontal =
-  Filter $ A.lmapStencil (fmap eUp) $ A.makeStencil (3 :. 3) (1 :. 1) $ \ f ->
+  Filter $ A.makeStencil (3 :. 3) (1 :. 1) $ \ f ->
                 f (-1 :. -1) -     f (-1 :.  1) +
             2 * f ( 0 :. -1) - 2 * f ( 0 :.  1) +
                 f ( 1 :. -1) -     f ( 1 :.  1)
 {-# INLINE sobelHorizontal #-}
 
-
-sobelHorizontalN ::
-     (ColorSpace cs (LevelUp e), ColorSpace cs e) => Filter cs e e
-sobelHorizontalN = normalizeSobel sobelHorizontal
-{-# INLINE sobelHorizontalN #-}
-
-normalizeSobel ::
-     forall cs e. (Elevator (LevelUp e), ColorSpace cs e)
-  => Filter cs e (LevelUp e)
-  -> Filter cs e e
-normalizeSobel = rmapFilter (fmap (\ x -> eDown ((x + 4 * eUp (eMaxValue :: e)) // 8)))
-{-# INLINE normalizeSobel #-}
-
-sobelVertical ::
-     (ColorSpace cs (LevelUp e), ColorSpace cs e) => Filter cs e (LevelUp e)
+-- | Sobel gradient along @y@ axis.
+--
+-- ==== __Convolution Kernel__
+--
+-- \[
+-- \mathbf{G}_y = \begin{bmatrix}
+-- +1 & +2 & +1 \\
+--  0 &  0 &  0 \\
+-- -1 & -2 & -1
+-- \end{bmatrix}
+-- \]
+sobelVertical :: ColorSpace cs e => Filter cs e e
 sobelVertical =
-  Filter $ A.lmapStencil (fmap eUp) $ A.makeStencil (3 :. 3) (1 :. 1) $ \ f ->
-          f (-1 :. -1) + 2 * f (-1 :. 0) + f (-1 :. 1)
-        - f ( 1 :. -1) - 2 * f ( 1 :. 0) - f ( 1 :. 1)
+  Filter $ A.makeStencil (3 :. 3) (1 :. 1) $ \ f ->
+              f (-1 :. -1) + 2 * f (-1 :. 0) + f (-1 :. 1)
+            - f ( 1 :. -1) - 2 * f ( 1 :. 0) - f ( 1 :. 1)
 {-# INLINE sobelVertical #-}
 
 
-sobelVerticalN ::
-     (ColorSpace cs (LevelUp e), ColorSpace cs e) => Filter cs e e
-sobelVerticalN = normalizeSobel sobelVertical
-{-# INLINE sobelVerticalN #-}
-
-
--- sobelOperator ::
---      (ColorSpace cs (LevelUp e), ColorSpace cs e) => Filter cs e Double
--- sobelOperator = fmap sqrt $ liftA2 (+) (fmap sqrd sobelHorizontal) (fmap sqrd sobelVertical)
---   where
---     sqrd x =
---       let xd = eCoerceToDouble x
---        in xd * xd
---     {-# INLINE sqrd #-}
--- {-# INLINE sobelOperator #-}
-
-
-sobelOperator :: (ColorSpace cs Double) => Filter' cs Double
+-- | Sobel Opertor is simply defined as:
+--
+-- @
+-- sobelOperator = sqrt (`sobelHorizontal` ^ 2 + `sobelVertical` ^ 2)
+-- @
+--
+-- \[
+-- \mathbf{G} = \sqrt{ {\mathbf{G}_x}^2 + {\mathbf{G}_y}^2 }
+-- \]
+sobelOperator :: ColorSpace cs Double => Filter' cs Double
 sobelOperator =
-  fmap sqrt $ liftA2 (+) (fmap sqr sobelHorizontal) (fmap sqr sobelVertical)
-  where
-    sqr x = x * x
-    {-# INLINE sqr #-}
+  sqrt (sobelHorizontal ^ (2 :: Int) + sobelVertical ^ (2 :: Int))
 {-# INLINE sobelOperator #-}
 
-sobelOperatorN :: (ColorSpace cs Double) => Filter' cs Double
-sobelOperatorN = fmap (/ sqrt 32) sobelOperator
-{-# INLINE sobelOperatorN #-}
 
-
-prewittHorizontal ::
-     (ColorSpace cs (LevelUp e), ColorSpace cs e) => Filter cs e (LevelUp e)
+-- | Prewitt gradient along @x@ axis.
+--
+-- ==== __Convolution Kernel__
+--
+-- \[
+-- \mathbf{G_x} = \begin{bmatrix}
+-- +1 & 0 & -1 \\
+-- +1 & 0 & -1 \\
+-- +1 & 0 & -1
+-- \end{bmatrix}
+-- \]
+prewittHorizontal :: ColorSpace cs e => Filter' cs e
 prewittHorizontal =
-  Filter $ A.lmapStencil (fmap eUp) $ A.makeStencil (3 :. 3) (1 :. 1) $ \ f ->
+  Filter $ A.makeStencil (3 :. 3) (1 :. 1) $ \ f ->
                 f (-1 :. -1) - f (-1 :.  1) +
                 f ( 0 :. -1) - f ( 0 :.  1) +
                 f ( 1 :. -1) - f ( 1 :.  1)
 {-# INLINE prewittHorizontal #-}
 
 
-prewittVertical ::
-     (ColorSpace cs (LevelUp e), ColorSpace cs e) => Filter cs e (LevelUp e)
+-- | Prewitt gradient along @y@ axis.
+--
+-- ==== __Convolution Kernel__
+--
+-- \[
+-- \mathbf{G_y} = \begin{bmatrix}
+-- +1 & +1 & +1 \\
+--  0 &  0 &  0 \\
+-- -1 & -1 & -1
+-- \end{bmatrix}
+-- \]
+prewittVertical :: ColorSpace cs e => Filter' cs e
 prewittVertical =
-  Filter $ A.lmapStencil (fmap eUp) $ A.makeStencil (3 :. 3) (1 :. 1) $ \ f ->
+  Filter $ A.makeStencil (3 :. 3) (1 :. 1) $ \ f ->
           f (-1 :. -1) + f ( 0 :. -1) + f ( 1 :. -1)
         - f (-1 :.  1) - f ( 0 :.  1) - f ( 1 :.  1)
 {-# INLINE prewittVertical #-}
 
 
-prewittOperator ::
-     (ColorSpace cs (LevelUp e), ColorSpace cs e) => Filter cs e Double
+-- | Prewitt Opertor is simply defined as: @sqrt (`prewittHorizontal` ^ 2 + `prewittVertical` ^ 2)@
+--
+-- \[
+-- \mathbf{G} = \sqrt{ {\mathbf{G}_x}^2 + {\mathbf{G}_y}^2 }
+-- \]
+prewittOperator :: ColorSpace cs Double => Filter' cs Double
 prewittOperator =
-  fmap (sqrt . eCoerceToDouble) $
-  liftA2 (+) (fmap (^ (2 :: Int)) prewittHorizontal) (fmap (^ (2 :: Int)) prewittVertical)
+  sqrt (prewittHorizontal ^ (2 :: Int) + prewittVertical ^ (2 :: Int))
 {-# INLINE prewittOperator #-}
-
-
-prewittOperator' ::
-     (ColorSpace cs (LevelUp e), ColorSpace cs e) => Filter cs e Double
-prewittOperator' = rmapFilter (fmap (/ sqrt 18)) prewittOperator
-{-# INLINE prewittOperator' #-}
 
 
 ----------------------------------
 ------- Benchmarking -------------
 ----------------------------------
 
-
--- laplacian :: (ColorSpace cs (LevelUp e), ColorSpace cs e) => Filter cs e e
--- laplacian =
---   Filter $
---   A.dimapStencil
---     (fmap eUp) (fmap eDown) $
---   (A.makeStencil (3 :. 3) (1 :. 1) $ \f' ->
---                     let f ix = f' ix in -- <- Very strange, doubles the performance
---                     (-1) * f (-1 :. -1) -       f (-1 :.  0) - f (-1 :.  1) -
---                            f ( 0 :. -1) + 8  *  f ( 0 :.  0) - f ( 0 :.  1) -
---                            f ( 1 :. -1) -       f ( 1 :.  0) - f ( 1 :.  1))
--- {-# INLINE laplacian #-}
-
-
-type CommonColorSpace cs
-   = ( ColorSpace cs Int16
-     , ColorSpace cs Int32
-     , ColorSpace cs Word32
-     , ColorSpace cs Word64
-     , ColorSpace cs Float
-     , ColorSpace cs Double)
-
-laplacianFilter :: (CommonColorSpace cs, ColorSpace cs e) => Filter' cs e
-laplacianFilter = laplacianFilterGeneric eCoerceToDouble eRoundFromDouble
-{-# INLINE [2] laplacianFilter #-}
-
-{-# RULES
-"laplacianFilter/Word8" [~2] laplacianFilter = laplacianFilter8
-"laplacianFilter/Word16" [~2] laplacianFilter = laplacianFilter16
- #-}
-
--- TODO: benchmark
-laplacianFilter8 :: (ColorSpace cs Int16, ColorSpace cs Word8) => Filter' cs Word8
-laplacianFilter8 =
-  laplacianFilterGeneric
-    (fromIntegral :: Word8 -> Int16)
-    (fromIntegral :: Int16 -> Word8)
-{-# INLINE [2] laplacianFilter8 #-}
-
--- TODO: benchmark
-laplacianFilter16 :: (ColorSpace cs Int32, ColorSpace cs Word16) => Filter' cs Word16
-laplacianFilter16 =
-  laplacianFilterGeneric (fromIntegral :: Word16 -> Int32) (fromIntegral :: Int32 -> Word16)
-{-# INLINE [2] laplacianFilter16 #-}
-
-
-laplacianFilterGeneric ::
-     (ColorSpace cs a, ColorSpace cs b) => (a -> b) -> (b -> a) -> Filter' cs a
-laplacianFilterGeneric to from =
-  Filter $
-  A.makeStencil (3 :. 3) (1 :. 1) $ \f' ->
-    let f ix = fmap to <$> f' ix
-     in fmap from <$> ((-1) * f (-1 :. -1) -     f (-1 :.  0) - f (-1 :.  1) -
-                              f ( 0 :. -1) + 8 * f ( 0 :.  0) - f ( 0 :.  1) -
-                              f ( 1 :. -1) -     f ( 1 :.  0) - f ( 1 :.  1))
-{-# INLINE laplacianFilterGeneric #-}
-
-laplacianFilterElevated ::
-     (ColorSpace cs (LevelUp a), ColorSpace cs a) => Filter' cs a
-laplacianFilterElevated = -- laplacianFilterGeneric eUp eDown
-  Filter
-    (A.makeStencil (3 :. 3) (1 :. 1) $ \f' ->
-       let f ix = fmap eUp <$> f' ix
-        in fmap eDown <$>
-           (8 * f (0 :. 0) +
-            (-1) *
-            (f (-1 :. -1) + f (-1 :. 0) + f (-1 :. 1) + f (0 :. -1) + f (0 :. 1) + f (1 :. -1) +
-             f (1 :. 0) +
-             f (1 :. 1))))
-{-# INLINE laplacianFilterElevated #-}
-
-
-
-
-genericSobelX ::
-     (ColorSpace cs b, ColorSpace cs a) => (a -> b) -> (b -> a) -> Filter' cs a
-genericSobelX to from =
-  Filter $ A.makeStencil (3 :. 3) (1 :. 1) $ \ f ->
-    fmap from <$> (
-          (fmap to <$> f (-1 :. -1))        +
-          (fmap to <$> f ( 0 :. -1)) *   2  +
-          (fmap to <$> f ( 1 :. -1))        +
-          (fmap to <$> f (-1 :.  1)) * (-1) +
-          (fmap to <$> f ( 0 :.  1)) * (-2) +
-          (fmap to <$> f ( 1 :.  1)) * (-1))
-{-# INLINE genericSobelX #-}
-
-
-eSobelX ::
-     (ColorSpace cs (LevelUp a), ColorSpace cs a) => Filter' cs a
-eSobelX =
-  Filter $ A.makeStencil (3 :. 3) (1 :. 1) $ \ f ->
-    fmap eDown <$> (
-          (fmap eUp <$> f (-1 :. -1))        +
-          (fmap eUp <$> f ( 0 :. -1)) *   2  +
-          (fmap eUp <$> f ( 1 :. -1))        +
-          (fmap eUp <$> f (-1 :.  1)) * (-1) +
-          (fmap eUp <$> f ( 0 :.  1)) * (-2) +
-          (fmap eUp <$> f ( 1 :.  1)) * (-1))
-{-# INLINE eSobelX #-}
+-- $filter
+--
+-- All filters are defined with a `A.Stencil`, as such they are mere functions and usually aren't
+-- backed by some array, although most of the time they do describe some sort of matrix, eg. a
+-- convolution kernel.
+--
+-- There are ways to adjust filters without knowing much about the image that it will be applied
+-- to. In fact, `Filter` is a `Functor`, `Applicative` and even a @Profunctor@ (see `rmapFilter`,
+-- `lmapFilter` and `bimapFilter`). Moreover, it is also an instance of `Num`, `Fractional` and
+-- `Floating`, so they can be used like regular numbers. Ability to compose filters together does not
+-- degrade performance, on contrary it will usually be an improvement, since it promotes fusion of
+-- computation, which means avoiding intermediary arrays.
+--
+-- Examples of composing two filters together would be `sobelOperator` and `prewittOperator`.

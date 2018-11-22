@@ -174,9 +174,9 @@ import           Prelude                   as P hiding (map, maximum, minimum,
 
 -- | Get the number of rows in an image. Same as `dims`, it does break fusion.
 --
--- >>> frog <- readImageRGB "images/frog.jpg"
+-- >>> frog <- readImageRGB "images/megabat.jpg"
 -- >>> frog
--- <Image RGB Double: 200x320>
+-- <Image RGB Double: 200x300>
 -- >>> rows frog
 -- 200
 --

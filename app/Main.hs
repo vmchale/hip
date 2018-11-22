@@ -6,7 +6,6 @@ import Graphics.Image as I
 
 main :: IO ()
 main = do
-  let a = setComp Seq $
-            makeImage (255 :. 255) (\(_ :. i) -> PixelY (fromIntegral i)) :: Image Y Word64
-  displayImage (downsampleRows (upsampleRows a))
-  
+  img <- readImageAuto "images/frog.jpg" ::  IO (Image RGB Double)
+  writeImage "foo.png" $ transpose img
+

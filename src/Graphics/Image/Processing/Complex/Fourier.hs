@@ -1,7 +1,7 @@
-{-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE BangPatterns          #-}
 {-# LANGUAGE ConstraintKinds       #-}
 {-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE MonoLocalBinds        #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
 -- |
@@ -23,16 +23,12 @@ import           Graphics.ColorSpace.Complex
 import           Graphics.Image.Internal     as I
 import           Prelude                     as P
 
-
-data Mode = Forward
-          | Inverse
-
 -- | Fast Fourier Transform
 fft ::
      (ColorSpace cs (Complex e), ColorSpace cs e, RealFloat e)
   => Image cs (Complex e)
   -> Image cs (Complex e)
-fft = fft2d Forward
+fft = Image . fft2d (-1) . toArray
 {-# INLINEABLE fft #-}
 
 
@@ -44,14 +40,10 @@ ifft ::
      )
   => Image cs (Complex e)
   -> Image cs (Complex e)
-ifft = fft2d Inverse
+ifft img = Image . A.compute . A.map (/ factor) . fft2d 1 . toArray $ img
+  where
+    !factor = fromIntegral $ totalPixels img
 {-# INLINEABLE ifft #-}
-
-
-signOfMode :: Num a => Mode -> a
-signOfMode Forward = -1
-signOfMode Inverse = 1
-{-# INLINE signOfMode #-}
 
 
 -- | Check if `Int` is a power of two.
@@ -60,30 +52,23 @@ isPowerOfTwo n = n /= 0 && (n .&. (n-1)) == 0
 {-# INLINE isPowerOfTwo #-}
 
 
--- | Compute the DFT of a matrix. Array dimensions must be powers of two else `error`.
+-- | Compute the FFT of an Image. Image dimensions must be powers of two else `error`.
 fft2d ::
      ( ColorSpace cs (Complex e)
      , ColorSpace cs e
      , RealFloat e
      )
-  => Mode
-  -> Image cs (Complex e)
-  -> Image cs (Complex e)
-fft2d !mode img@(Image arr) =
-  let (m :. n) = A.size arr
-      !sign = signOfMode mode
-      !factor = fromIntegral (m * n)
-  in if not (isPowerOfTwo m && isPowerOfTwo n)
-       then error $
-            unlines
-              [ "fft"
-              , "  Array dimensions must be powers of two,"
-              , "  but the provided image is " ++ show img ++ "."
-              ]
-       else Image $
-            case mode of
-              Forward -> fftArray sign $ fftArray sign arr
-              Inverse -> A.compute $ A.map (/ factor) $ fftArray sign $ fftArray sign arr
+  => Pixel cs e
+  -> A.Array A.S Ix2 (Pixel cs (Complex e))
+  -> A.Array A.S Ix2 (Pixel cs (Complex e))
+fft2d !sign arr
+  | isPowerOfTwo m && isPowerOfTwo n = fftArray sign $ fftArray sign arr
+  | otherwise =
+    error $
+    "fft2d:  Array dimensions must be powers of two," ++
+    " but the supplied image has " ++ show (Image arr) ++ "."
+  where
+    (m :. n) = A.size arr
 {-# INLINE fft2d #-}
 
 

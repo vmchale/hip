@@ -75,6 +75,7 @@ module Graphics.Image.IO
   ) where
 
 import           Control.Monad.IO.Class  (MonadIO (..))
+import qualified Data.Massiv.Array       as A
 import qualified Data.Massiv.Array.IO    as A
 import           Graphics.ColorSpace
 import           Graphics.Image.Internal
@@ -106,7 +107,7 @@ readImage ::
      (MonadIO m, ColorSpace cs e)
   => FilePath -- ^ File path for an image
   -> m (Image cs e)
-readImage path = fmap Image (liftIO (A.readImage path))
+readImage path = fmap (Image . A.setComp Par) (liftIO (A.readImage path))
 {-# NOINLINE readImage #-}
 
 
@@ -116,7 +117,7 @@ readImage path = fmap Image (liftIO (A.readImage path))
 readImageAuto :: (MonadIO m, ColorSpace cs e) =>
                   FilePath -- ^ File path for an image
                -> m (Image cs e)
-readImageAuto path = fmap Image (liftIO (A.readImageAuto path))
+readImageAuto path = fmap (Image . A.setComp Par) (liftIO (A.readImageAuto path))
 {-# INLINE readImageAuto #-}
 
 

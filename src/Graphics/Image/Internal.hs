@@ -28,6 +28,7 @@ module Graphics.Image.Internal
   , setComp
   , dims
   , isEmpty
+  , totalPixels
   , map
   , imap
   , zipWith
@@ -160,6 +161,9 @@ isEmpty :: ColorSpace cs e => Image cs e -> Bool
 isEmpty (Image arr) = A.isEmpty arr
 {-# INLINE isEmpty #-}
 
+totalPixels :: ColorSpace cs e => Image cs e -> Int
+totalPixels = A.totalElem . dims
+{-# INLINE totalPixels #-}
 
 -- | By default all images are created with parallel computation strategy, but it can be changed
 -- with this function.
@@ -391,8 +395,10 @@ foldSemi ::
 foldSemi f m = A.fold (<>) m . A.map f . delayI
 {-# INLINE [~1] foldSemi #-}
 
-
--- | Semigroup reduction of a non-empty image, while using the 0th pixel as initial element.
+-- FIX: initial element will get counted twice. Either implement fold1 upstream or do `(extract 1
+-- (sz-1) . resize (totalElem sz))`. Benchmark the affect of adjustment.
+-- | Semigroup reduction of a non-empty image, while using the 0th pixel as initial element. Will
+-- throw an index out of bounds error if image is empty.
 foldSemi1 ::
      (Semigroup m, ColorSpace cs e)
   => (Pixel cs e -> m) -- ^ Function that converts every pixel in the image to a `Semigroup`.
@@ -420,13 +426,13 @@ minPixel = getMin . foldSemi1 Min
 -- | Find the largest channel value among all pixels in the image. Throws an error on empty (see
 -- `isEmpty`) images.
 maxVal :: (Ord e, ColorSpace cs e) => Image cs e -> e
-maxVal (Image arr) = A.maximum $ A.map maximum arr
+maxVal = (A.maximum . A.map maximum) . delayI
 {-# INLINE [~1] maxVal #-}
 
 -- | Find the smallest channel value among all pixels in the image. Throws an error on empty (see
 -- `isEmpty`) images.
 minVal :: (Ord e, ColorSpace cs e) => Image cs e -> e
-minVal (Image arr) = A.minimum $ A.map minimum arr
+minVal = (A.minimum . A.map minimum) . delayI
 {-# INLINE [~1] minVal #-}
 
 
