@@ -406,6 +406,8 @@ scale method border (fM, fN) img =
 {-# INLINE scale #-}
 
 
+
+
 ----------------------
 -- Helper functions --
 ----------------------
