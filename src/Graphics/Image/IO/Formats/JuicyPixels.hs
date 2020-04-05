@@ -79,7 +79,7 @@ import qualified Data.ByteString.Lazy            as BL (ByteString)
 import qualified Data.Monoid                     as M (mempty)
 import qualified Data.Vector.Storable            as V
 import           Graphics.Image.ColorSpace
-import           Graphics.Image.Interface        as I
+import           Graphics.Image.Interface        as I hiding (map)
 import           Graphics.Image.Interface.Vector (VS)
 import           Graphics.Image.IO.Base
 
@@ -167,6 +167,10 @@ fromJPImageY8 = jpImageToImageUnsafe
 fromJPImageY16 :: JP.Image JP.Pixel16 -> Image VS Y Word16
 fromJPImageY16 = jpImageToImageUnsafe
 {-# INLINE fromJPImageY16 #-}
+
+fromJPImageY32 :: JP.Image JP.Pixel32 -> Image VS Y Word32
+fromJPImageY32 = jpImageToImageUnsafe
+{-# INLINE fromJPImageY32 #-}
 
 fromJPImageYA8 :: JP.Image JP.PixelYA8 -> Image VS YA Word8
 fromJPImageYA8 = jpImageToImageUnsafe
@@ -280,6 +284,7 @@ jpDynamicImageToImage
 jpDynamicImageToImage (JP.ImageY8 jimg)     = convert $ fromJPImageY8 jimg
 jpDynamicImageToImage (JP.ImageYA8 jimg)    = convert $ fromJPImageYA8 jimg
 jpDynamicImageToImage (JP.ImageY16 jimg)    = convert $ fromJPImageY16 jimg
+jpDynamicImageToImage (JP.ImageY32 jimg)    = convert $ fromJPImageY32 jimg
 jpDynamicImageToImage (JP.ImageYA16 jimg)   = convert $ fromJPImageYA16 jimg
 jpDynamicImageToImage (JP.ImageYF jimg)     = convert $ fromJPImageYF jimg
 jpDynamicImageToImage (JP.ImageRGB8 jimg)   = convert $ fromJPImageRGB8 jimg
@@ -296,6 +301,7 @@ jpDynamicImageToImage (JP.ImageCMYK16 jimg) = convert $ fromJPImageCMYK16 jimg
 jpImageShowCS :: JP.DynamicImage -> String
 jpImageShowCS (JP.ImageY8 _)     = "Y8 (Pixel Y Word8)"
 jpImageShowCS (JP.ImageY16 _)    = "Y16 (Pixel Y Word16)"
+jpImageShowCS (JP.ImageY32 _)    = "Y32 (Pixel Y Word32)"
 jpImageShowCS (JP.ImageYF _)     = "YF (Pixel Y Float)"
 jpImageShowCS (JP.ImageYA8 _)    = "YA8 (Pixel YA Word8)"
 jpImageShowCS (JP.ImageYA16 _)   = "YA16 (Pixel YA Word16)"
@@ -416,6 +422,7 @@ instance ImageFormat GIFA where
 instance ImageFormat (Seq GIF) where
   data SaveOption (Seq GIF) = GIFSeqPalette JP.PaletteOptions
                             | GIFSeqLooping JP.GifLooping
+                            | GIFSeqDisposal JP.GifDisposalMethod
   ext _ = ext GIF
 
 
@@ -585,8 +592,31 @@ encodeGIFSeq !opts =
     {-# INLINE palletizeGif #-}
 {-# INLINE encodeGIFSeq #-}
 
+{-# INLINE encodeGIFSeqA #-}
+encodeGIFSeqA :: [SaveOption (Seq GIF)]
+           -> [(JP.GifDelay, Image VS RGBA Word8)] -> BL.ByteString
+encodeGIFSeqA !opts frms =
+  case output of
+    Left err -> error err
+    Right res -> res
+  where width = JP.imageWidth $ snd $ head jPimgs
+        height = JP.imageHeight $ snd $ head jPimgs
+        jPimgs = map (\(d,i) -> (d,toJPImageRGBA8 i)) frms
+        frames = JP.palettizeWithAlpha jPimgs $ getGIFSeqDisposal opts
+        getGIFSeqDisposal []                          = JP.DisposalRestoreBackground
+        getGIFSeqDisposal (GIFSeqDisposal disposal:_) = disposal
+        getGIFSeqDisposal (_:xs)                      = getGIFSeqDisposal xs
+        getGIFSeqLoop []                  = JP.LoopingNever
+        getGIFSeqLoop (GIFSeqLooping l:_) = l
+        getGIFSeqLoop (_:xs)              = getGIFSeqLoop xs
+        input = JP.GifEncode width height Nothing Nothing (getGIFSeqLoop opts) frames
+        output = JP.encodeComplexGifImage input
+
 instance Writable [(JP.GifDelay, Image VS RGB Word8)] (Seq GIF) where
   encode _ opts = encodeGIFSeq opts
+
+instance Writable [(JP.GifDelay, Image VS RGBA Word8)] (Seq GIF) where
+  encode _ opts = encodeGIFSeqA opts
 
 instance Writable [(JP.GifDelay, Image VS RGB Double)] (Seq GIF) where
   encode _ opts = encodeGIFSeq opts . fmap (fmap toWord8I)
